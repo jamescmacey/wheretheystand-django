@@ -12,12 +12,19 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9$^-xo)71^&2p*lvups$57h2gh-@yuw4yy6=r(tg1h$6yn%62a'
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY is not set")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", default="False") == "True"
 
-ALLOWED_HOSTS = []
+if not DEBUG:
+    ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", default="").split(",")
+    if not ALLOWED_HOSTS:
+        raise ValueError("ALLOWED_HOSTS is not set")
+else:
+    ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -67,16 +74,15 @@ WSGI_APPLICATION = 'wts.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'wts',
-        'USER': 'wts',
-        'PASSWORD': '2hwbDpMCzPtWiXqP8uofadBIRM1cwr8w20pM4is00YcbgDsvCTOmxHAointzOAsJ',
-        'HOST': 'mysql.h1.jamescmacey.com',
-        'PORT': '55432',
+        'USER': os.getenv("MYSQL_USER"),
+        'PASSWORD': os.getenv("MYSQL_PASSWORD"),
+        'HOST': os.getenv("MYSQL_HOST"),
+        'PORT': os.getenv("MYSQL_PORT"),
     }
 }
 
@@ -123,9 +129,19 @@ BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; W
 
 STATIC_URL = 'https://api-static.wheretheystand.nz/'
 
+# Email settings
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+EMAIL_PORT = os.getenv("EMAIL_PORT")
+EMAIL_USE_TLS = True
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
+SERVER_EMAIL = os.getenv("SERVER_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
+EMAIL_SUBJECT_PREFIX = ""
+
 
 # Password validation
-# https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -144,7 +160,6 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # Internationalization
-# https://docs.djangoproject.com/en/5.1/topics/i18n/
 
 LANGUAGE_CODE = 'en-nz'
 
@@ -156,6 +171,4 @@ USE_TZ = True
 
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
