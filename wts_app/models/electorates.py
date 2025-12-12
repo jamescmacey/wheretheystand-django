@@ -21,8 +21,7 @@ class Electorate(BaseModel):
     STATUSES = [("current","Current"),("retiring", "Retiring"),("new", "New"),("former", "Former"),("renamed","Renamed")]
     STATUSES_LOOKUP = dict(STATUSES)
     status = models.CharField(max_length=10,choices=STATUSES,default="current")
-    replacement_electorate = models.ForeignKey('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replaced")
-    replaced_electorate = models.ForeignKey('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replacement")
+    replaced = models.ForeignKey('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replacement")
 
     valid_from = models.DateField()
     valid_to = models.DateField(blank=True,null=True)

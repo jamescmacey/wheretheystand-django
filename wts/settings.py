@@ -120,14 +120,14 @@ STORAGES = {
             "access_key": os.getenv("R2_ACCESS_KEY_ID"),
             "secret_key": os.getenv("R2_SECRET_ACCESS_KEY"),
             "querystring_auth": False,
-            "custom_domain": "api-static.wheretheystand.nz",
+            "custom_domain": os.getenv("API_STATIC_CUSTOM_DOMAIN"),
         },
     },
 }
 
 BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; WhereTheyStand/2.0)") 
 
-STATIC_URL = 'https://api-static.wheretheystand.nz/'
+STATIC_URL = f'https://{os.getenv("API_STATIC_CUSTOM_DOMAIN")}/'
 
 # Email settings
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
