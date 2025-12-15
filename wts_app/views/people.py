@@ -8,6 +8,11 @@ from rest_framework import generics
 from rest_framework import serializers
 from ..models import Person, ParliamentaryAffiliation, PartyAffiliation, MinisterialAffiliation
 from .documents import SimpleFileSerializer
+from .base import StandardResultsSetPagination
+from .parliaments import ParliamentSerializer
+from .electorates import ElectorateSerializer
+from .elections import ElectionSerializer
+from .gazette import GazetteNoticeSerializer
 
 # Serializers
 class PersonSerializer(serializers.ModelSerializer):
@@ -18,6 +23,11 @@ class PersonSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ParliamentaryAffiliationSerializer(serializers.ModelSerializer):
+    parliament = ParliamentSerializer(read_only=True)
+    electorate = ElectorateSerializer(read_only=True)
+    election = ElectionSerializer(read_only=True)
+    gazette_notice_election = GazetteNoticeSerializer(read_only=True)
+    gazette_notice_vacation = GazetteNoticeSerializer(read_only=True)
     class Meta:
         model = ParliamentaryAffiliation
         fields = '__all__'
@@ -36,6 +46,7 @@ class MinisterialAffiliationSerializer(serializers.ModelSerializer):
 class PersonListCreateView(generics.ListCreateAPIView):
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
+    pagination_class = StandardResultsSetPagination
 
 class PersonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Person.objects.all()
@@ -45,6 +56,7 @@ class PersonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 class ParliamentaryAffiliationListCreateView(generics.ListCreateAPIView):
     queryset = ParliamentaryAffiliation.objects.all()
     serializer_class = ParliamentaryAffiliationSerializer
+    pagination_class = StandardResultsSetPagination
 
 class ParliamentaryAffiliationRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ParliamentaryAffiliation.objects.all()

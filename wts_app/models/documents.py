@@ -6,6 +6,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.core.files.storage import storages
 from .base import BaseModel
+from django.utils.text import slugify
 
 def hash_file(file, block_size=65536):
     hasher = hashlib.md5()
@@ -99,12 +100,6 @@ class Document(BaseModel):
     categories = models.ManyToManyField(Category)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    slug = models.SlugField(unique=True,blank=True,null=True)
-
-    def save(self, *args, **kwargs):
-        if not self.id or not self.slug:
-            self.slug = slugify(self.name)
-        super(Document, self).save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -140,7 +135,7 @@ class File(BaseModel):
         super(File, self).delete(*args, **kwargs)
     
 
-class DocumentCollection(models.Model):
+class DocumentCollection(BaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)

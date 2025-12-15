@@ -13,9 +13,10 @@ from .parliaments import *  # Parliament views
 from .elections import *  # Election views
 from .documents import *  # Category, CopyrightParty, Licence, Document, File, DocumentCollection views
 from .gazette import *  # GazetteNotice views
+from .financial_interests import *  # Financial interest views
 
 # Make all views available at the package level
 __all__ = [
-    # Add view names here as you create them
+    "PersonFinancialInterestsView",
 ]
 

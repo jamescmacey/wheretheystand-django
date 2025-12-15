@@ -24,10 +24,6 @@ class LicenceSerializer(serializers.ModelSerializer):
         model = Licence
         fields = '__all__'
 
-class DocumentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Document
-        fields = '__all__'
 
 class FileSerializer(serializers.ModelSerializer):
     copyright_owner = CopyrightPartySerializer(read_only=True)
@@ -46,6 +42,12 @@ class SimpleFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = File
         fields = ['id', 'file', 'copyright_owner', 'licence_grantor', 'licence']
+
+class DocumentSerializer(serializers.ModelSerializer):
+    files = FileSerializer(many=True, read_only=True)
+    class Meta:
+        model = Document
+        fields = ['id', 'name', 'description', 'files']
 
 class DocumentCollectionSerializer(serializers.ModelSerializer):
     class Meta:

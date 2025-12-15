@@ -8,12 +8,12 @@ from django.db import models
 from django.utils import timezone
 from .base import BaseModel
 from .parties import Party
-from .parliaments import Parliament
 from .electorates import Electorate
 from django.utils.text import slugify
-from .elections import Election
 from .gazette import GazetteNotice
 from .documents import File
+from django.core.validators import MinValueValidator
+from .documents import Document
 
 
 class Person(BaseModel):
@@ -26,6 +26,7 @@ class Person(BaseModel):
     display_name = models.CharField(max_length=200)
     slug = models.SlugField(unique=True,blank=True,null=True)
     photo = models.ForeignKey(File, on_delete=models.SET_NULL, blank=True, null=True, related_name="people")
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if not self.id or not self.slug:
@@ -111,14 +112,15 @@ class ParliamentaryAffiliation(BaseModel):
     elected_date = models.DateField(blank=True, null=True)
     sworn_date = models.DateField(blank=True,null=True)
     end_date = models.DateField(blank=True,null=True)
-    parliament = models.ForeignKey(Parliament,on_delete=models.CASCADE)
-    person = models.ForeignKey(Person,on_delete=models.CASCADE)
+    parliament = models.ForeignKey('Parliament',on_delete=models.CASCADE)
+    person = models.ForeignKey('Person',on_delete=models.CASCADE)
     electorate = models.ForeignKey(Electorate,on_delete=models.CASCADE, blank=True, null=True)
-    election = models.ForeignKey(Election, on_delete=models.SET_NULL, blank=True, null=True)
+    election = models.ForeignKey('Election', on_delete=models.SET_NULL, blank=True, null=True)
     fallback_electorate_slug = models.TextField(blank=True,null=True)
     replaced = models.ForeignKey('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replacements")
     gazette_notice_election = models.ForeignKey(GazetteNotice, on_delete=models.SET_NULL, blank=True, null=True, related_name="elected_affiliations")
     gazette_notice_vacation = models.ForeignKey(GazetteNotice, on_delete=models.SET_NULL, blank=True, null=True, related_name="vacated_affiliations")
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     END_REASONS = [
         ("e93_55_1_a", "Electoral Act 1993, s 55(1)(a): Non-attendance"),
@@ -154,19 +156,21 @@ class ParliamentaryAffiliation(BaseModel):
     start_reason = models.CharField(max_length=16, choices=START_REASONS, blank=True, null=True)
 
 
-class PartyAffiliation(models.Model):
+class PartyAffiliation(BaseModel):
     person = models.ForeignKey(Person,on_delete=models.CASCADE)
     start_date = models.DateField()
     end_date = models.DateField(blank=True,null=True)
     party = models.ForeignKey(Party,on_delete=models.CASCADE)
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     def __str__(self):
         return self.person.display_name + " " + self.party.display_name
 
 
-class MinisterialPortfolio(models.Model):
+class MinisterialPortfolio(BaseModel):
     name = models.TextField()
     slug = models.TextField(blank=True,null=True)
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if not self.id or not self.slug:
@@ -178,7 +182,7 @@ class MinisterialPortfolio(models.Model):
     def __str__(self):
         return self.name
 
-class MinisterialAffiliation(models.Model):
+class MinisterialAffiliation(BaseModel):
     person = models.ForeignKey(Person, on_delete=models.CASCADE)
     start_date = models.DateField()
     end_date = models.DateField(blank=True, null=True)
@@ -186,6 +190,7 @@ class MinisterialAffiliation(models.Model):
     conjunction = models.TextField(blank=True, null=True)
     portfolio = models.ForeignKey(MinisterialPortfolio, on_delete=models.CASCADE)
     specialisation = models.TextField(blank=True, null=True)
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     APPOINTMENT_METHODS = [("l","Letter"), ("w","Warrant"),("pus w","Parliamentary Under-Secretary Warrant")]
     APPOINTMENT_METHODS_LOOKUP = dict(APPOINTMENT_METHODS)
@@ -208,3 +213,29 @@ class MinisterialAffiliation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.person.display_name}, {self.description()}"
+
+class FinancialInterestSnapshot(BaseModel):
+    as_at = models.DateField()
+    person = models.ForeignKey(Person,on_delete=models.CASCADE)
+    document = models.ForeignKey(Document,on_delete=models.SET_NULL,blank=True,null=True)
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.person.display_name} - {self.as_at}"
+
+class FinancialInterest(BaseModel):
+    TYPES = [("1","Company directorships and controlling interests"),("2", "Other companies and business entities"),("3", "Employment"),("4", "Beneficial interests in, and trusteeships of, trusts"),("5","Organisations and trusts seeking Government funding"),("6","Real property"),("7","Retirement schemes"),("8","Managed investment schemes"),("9","Debtors"),("10","Creditors"),("11","Overseas travel costs"),("12","Gifts"),("13","Discharged debts"),("14","Payments for activities")]
+    interest_type = models.CharField(max_length=2,choices=TYPES)
+    snapshot = models.ForeignKey(FinancialInterestSnapshot,on_delete=models.CASCADE)
+    description = models.TextField()
+
+    nzbn_entity_name = models.TextField(blank=True,null=True)
+    nzbn = models.TextField(blank=True,null=True)
+    nzbn_entity_type_code = models.TextField(blank=True,null=True)
+    nzbn_entity_type_desc = models.TextField(blank=True, null=True)
+    nzbn_entity_classifications = models.TextField(blank=True, null=True)
+    nzbn_entity_classifications_descs = models.TextField(blank=True, null=True)
+
+
+    def __str__(self):
+        return f"{self.report} : {self.interestType} : {self.description}"
