@@ -17,7 +17,16 @@ class GazetteNotice(BaseModel):
     number = models.CharField(max_length=255, unique=True)
     file = models.ForeignKey(File, on_delete=models.SET_NULL, related_name="gazette_notices", null=True, blank=True)
 
+    class Meta:
+        ordering = ['-file__published_date']
+
     def __str__(self):
+        if self.file and self.file.file_name and self.file.published_date:
+            return f"{self.number} - {self.file.file_name} - {self.file.published_date.strftime('%-d %B %Y')}"
+        elif self.file and self.file.file_name:
+            return f"{self.number} - {self.file.file_name}"
+        elif self.file and self.file.published_date:
+            return f"{self.number} - {self.file.published_date}"
         return self.number
 
     def save(self, *args, **kwargs):
@@ -50,8 +59,11 @@ class GazetteNotice(BaseModel):
 
                 # Access the base URL and scrape it to get the document description and published date              
                 try:
-                    base_url_response = urllib.request.urlopen(base_url, timeout=10, headers={'User-Agent': settings.BOT_USER_AGENT})
-                    base_url_content = base_url_response.read()
+                    # FIX: Use Request object to add User-Agent
+                    req = urllib.request.Request(base_url)
+                    req.add_header('User-Agent', settings.BOT_USER_AGENT)
+                    with urllib.request.urlopen(req, timeout=10) as base_url_response:
+                        base_url_content = base_url_response.read()
                 except (urllib.error.HTTPError, urllib.error.URLError) as e:
                     print(f"Error retrieving Gazette Notice page for {self.number}: {e}")
                     base_url_content = b""

@@ -40,6 +40,8 @@ INSTALLED_APPS = [
     'wts_app',
     'storages',
     'colorfield',
+    'drf_spectacular',
+    'drf_spectacular_sidecar',
 ]
 
 MIDDLEWARE = [
@@ -72,6 +74,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'wts.wsgi.application'
 
+# Spectacular settings
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'WhereTheyStand API',
+    'DESCRIPTION': 'This is the API for WhereTheyStand.  Although the endpoints here are public, the main purpose of this API is to provide data for the WhereTheyStand website.  Things may therefore break without notice.',
+    'VERSION': '2.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SWAGGER_UI_DIST': 'SIDECAR',  # shorthand to use the sidecar instead
+    'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
+    'REDOC_DIST': 'SIDECAR',
+    'CONTACT': {
+        'name': 'WhereTheyStand',
+        'url': 'https://wheretheystand.nz',
+    }
+}
+
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticatedOrReadOnly'],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
 
 # Database
 

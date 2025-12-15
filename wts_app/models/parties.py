@@ -8,6 +8,7 @@ from django.db import models
 from django.utils import timezone
 from colorfield.fields import ColorField
 from .base import BaseModel
+from django.core.validators import MinValueValidator
 
 
 class Party(BaseModel):
@@ -24,6 +25,13 @@ class Party(BaseModel):
 
     party_leader_role = models.TextField(default="Leader")
     party_leader_role_plural = models.TextField(default="Leaders")
+
+    registered_date = models.DateField(blank=True, null=True)
+    deregistered_date = models.DateField(blank=True, null=True)
+    is_registered = models.BooleanField(default=False)
+    registration_dates_precise = models.BooleanField(default=False)
+
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     class Meta:
         verbose_name_plural = "Parties"

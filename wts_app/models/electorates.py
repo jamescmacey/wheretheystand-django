@@ -8,7 +8,7 @@ from django.db import models
 from .base import BaseModel
 from .documents import File, Document
 from .gazette import GazetteNotice
-
+from django.core.validators import MinValueValidator
 
 class Electorate(BaseModel):
     """
@@ -22,6 +22,8 @@ class Electorate(BaseModel):
     STATUSES_LOOKUP = dict(STATUSES)
     status = models.CharField(max_length=10,choices=STATUSES,default="current")
     replaced = models.ForeignKey('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replacement")
+
+    legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
     valid_from = models.DateField()
     valid_to = models.DateField(blank=True,null=True)
