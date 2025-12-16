@@ -14,6 +14,7 @@ from .gazette import GazetteNotice
 from .documents import File
 from django.core.validators import MinValueValidator
 from .documents import Document
+from colorfield.fields import ColorField
 
 
 class Person(BaseModel):
@@ -27,6 +28,8 @@ class Person(BaseModel):
     slug = models.SlugField(unique=True,blank=True,null=True)
     photo = models.ForeignKey(File, on_delete=models.SET_NULL, blank=True, null=True, related_name="people")
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
+    cached_description = models.TextField(blank=True, null=True)
+    cached_colour = ColorField(blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if not self.id or not self.slug:

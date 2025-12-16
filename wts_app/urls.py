@@ -31,8 +31,10 @@ from .views import (
     ElectorateBoundaryListCreateView,
     ElectorateBoundaryRetrieveUpdateDestroyView,
     PersonFinancialInterestsView,
+    PersonFinancialInterestLatestView,
     PersonFinancialInterestSnapshotListCreateView,
     PersonFinancialInterestSnapshotRetrieveUpdateDestroyView,
+    MPListView,
 )
 
 urlpatterns = [
@@ -40,6 +42,7 @@ urlpatterns = [
     path("people/", PersonListCreateView.as_view(), name="person-list-create"),
     path("people/<slug:slug>/", PersonRetrieveUpdateDestroyView.as_view(), name="person-detail"),
     path("people/<slug:slug>/financial-interests/", PersonFinancialInterestsView.as_view(), name="person-financial-interests"),
+    path("people/<slug:slug>/financial-interests/latest/", PersonFinancialInterestLatestView.as_view(), name="person-financial-interests-latest"),
     path("people/<slug:slug>/financial-interests/<uuid:pk>/", PersonFinancialInterestSnapshotRetrieveUpdateDestroyView.as_view(), name="person-financial-snapshot-detail"),
 
     # ParliamentaryAffiliation endpoints
@@ -97,4 +100,7 @@ urlpatterns = [
     # ElectorateBoundary endpoints
     path("electorate-boundaries/", ElectorateBoundaryListCreateView.as_view(), name="electorateboundary-list-create"),
     path("electorate-boundaries/<uuid:pk>/", ElectorateBoundaryRetrieveUpdateDestroyView.as_view(), name="electorateboundary-detail"),
+
+    # Members of Parliament endpoints
+    path("members-of-parliament/", MPListView.as_view(), name="members-of-parliament"),
 ]
