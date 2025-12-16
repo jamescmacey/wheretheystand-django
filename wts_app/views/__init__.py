@@ -14,9 +14,4 @@ from .elections import *  # Election views
 from .documents import *  # Category, CopyrightParty, Licence, Document, File, DocumentCollection views
 from .gazette import *  # GazetteNotice views
 from .financial_interests import *  # Financial interest views
-
-# Make all views available at the package level
-__all__ = [
-    "PersonFinancialInterestsView",
-]
-
+from .members_of_parliament import *  # Members of Parliament views

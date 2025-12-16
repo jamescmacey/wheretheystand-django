@@ -21,7 +21,7 @@ class Electorate(BaseModel):
     STATUSES = [("current","Current"),("retiring", "Retiring"),("new", "New"),("former", "Former"),("renamed","Renamed")]
     STATUSES_LOOKUP = dict(STATUSES)
     status = models.CharField(max_length=10,choices=STATUSES,default="current")
-    replaced = models.ForeignKey('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replacement")
+    replaced = models.OneToOneField('self',on_delete=models.SET_NULL, blank=True, null=True, related_name="replacement")
 
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
@@ -43,6 +43,14 @@ class Electorate(BaseModel):
 class ElectorateBoundarySet(BaseModel):
     gazette_notice = models.ForeignKey(GazetteNotice, on_delete=models.SET_NULL, blank=True, null=True)
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="electorate_boundary_sets")
+
+    def __str__(self):
+        if self.document:
+            return f"{self.document.name}"
+        elif self.gazette_notice and self.gazette_notice.file:
+            return f"{self.gazette_notice.number} - {self.gazette_notice.file.file_name}"
+        else:
+            return self.id
 
 class ElectorateBoundary(BaseModel):
     electorate = models.ForeignKey(Electorate, on_delete=models.CASCADE)

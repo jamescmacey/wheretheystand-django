@@ -15,13 +15,6 @@ from .elections import ElectionSerializer
 from .gazette import GazetteNoticeSerializer
 
 # Serializers
-class PersonSerializer(serializers.ModelSerializer):
-    photo = SimpleFileSerializer(read_only=True)
-    
-    class Meta:
-        model = Person
-        fields = '__all__'
-
 class ParliamentaryAffiliationSerializer(serializers.ModelSerializer):
     parliament = ParliamentSerializer(read_only=True)
     electorate = ElectorateSerializer(read_only=True)
@@ -41,15 +34,56 @@ class MinisterialAffiliationSerializer(serializers.ModelSerializer):
     class Meta:
         model = MinisterialAffiliation
         fields = '__all__'
+    
+class PersonSimpleSerializer(serializers.ModelSerializer):
+    photo = SimpleFileSerializer(read_only=True)
+    
+    class Meta:
+        model = Person
+        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour']
+
+class PersonSerializer(serializers.ModelSerializer):
+    photo = SimpleFileSerializer(read_only=True)
+    parliamentary_affiliations = ParliamentaryAffiliationSerializer(many=True, read_only=True, source='parliamentaryaffiliation_set')
+    party_affiliations = PartyAffiliationSerializer(many=True, read_only=True, source='partyaffiliation_set')
+    ministerial_affiliations = MinisterialAffiliationSerializer(many=True, read_only=True, source='ministerialaffiliation_set')
+
+    class Meta:
+        model = Person
+        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'parliamentary_affiliations', 'party_affiliations', 'ministerial_affiliations']
+
 
 # DRF Views
 class PersonListCreateView(generics.ListCreateAPIView):
-    queryset = Person.objects.all()
-    serializer_class = PersonSerializer
+    def get_queryset(self):
+        return Person.objects.prefetch_related(
+            'parliamentaryaffiliation_set__parliament',
+            'parliamentaryaffiliation_set__electorate',
+            'parliamentaryaffiliation_set__election',
+            'parliamentaryaffiliation_set__gazette_notice_election',
+            'parliamentaryaffiliation_set__gazette_notice_vacation',
+            'partyaffiliation_set__party',
+            'ministerialaffiliation_set__portfolio',
+        ).select_related('photo')
+    
+    def get_serializer_class(self):
+        if self.request and self.request.method == "GET":
+            return PersonSerializer
+        return PersonSerializer
     pagination_class = StandardResultsSetPagination
 
 class PersonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Person.objects.all()
+    def get_queryset(self):
+        return Person.objects.prefetch_related(
+            'parliamentaryaffiliation_set__parliament',
+            'parliamentaryaffiliation_set__electorate',
+            'parliamentaryaffiliation_set__election',
+            'parliamentaryaffiliation_set__gazette_notice_election',
+            'parliamentaryaffiliation_set__gazette_notice_vacation',
+            'partyaffiliation_set__party',
+            'ministerialaffiliation_set__portfolio',
+        ).select_related('photo')
+    
     serializer_class = PersonSerializer
     lookup_field = 'slug'  # Or 'slug' if you use slugs
 

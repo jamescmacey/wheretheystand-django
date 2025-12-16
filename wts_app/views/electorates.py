@@ -10,7 +10,15 @@ from ..models import Electorate, ElectorateBoundarySet, ElectorateBoundary
 from .documents import SimpleFileSerializer, DocumentSerializer
 from .gazette import GazetteNoticeSerializer
 
+class ElectorateNestedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Electorate
+        exclude = ['replaced']
+
 class ElectorateSerializer(serializers.ModelSerializer):
+    replaced = ElectorateNestedSerializer(read_only=True)
+    replacement = ElectorateNestedSerializer(read_only=True)
+
     class Meta:
         model = Electorate
         fields = '__all__'
