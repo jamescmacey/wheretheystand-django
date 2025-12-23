@@ -11,6 +11,7 @@ from django.utils.text import slugify
 from .electorates import ElectorateBoundarySet, Electorate
 from .gazette import GazetteNotice
 from .parties import Party
+from colorfield.fields import ColorField
 
 class Election(BaseModel):
     polling_date = models.DateField()
@@ -38,6 +39,10 @@ class ElectionResultVersion(BaseModel):
     description = models.TextField(blank=True, null=True)
     slug = models.SlugField(blank=True,null=True)
 
+    MODES = [("api", "API"),("firebase", "Firebase")]
+    access_mode = models.CharField(max_length=20, choices=MODES, default="api")
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+
     class Meta:
         unique_together = ('election', 'slug')
 
@@ -56,52 +61,139 @@ class ElectionResultVersion(BaseModel):
         return f'{self.name} ({self.election.name})'
 
 class ElectionElectorate(BaseModel):
-    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE)
+    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
     electorate = models.ForeignKey(Electorate, on_delete=models.SET_NULL, blank=True, null=True)
     number = models.IntegerField(validators=[MinValueValidator(1)])
     name = models.TextField()
-
+    
     # A candidate election in an electorate may be cancelled if a candidate dies or becomes incapacitated.
     accepting_candidate_votes = models.BooleanField(default=True)
 
-class ElectionParty(BaseModel):
-    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE)
-    party = models.ForeignKey(Party, on_delete=models.SET_NULL, blank=True, null=True)
-    number = models.IntegerField(validators=[MinValueValidator(1)])
-    name: str
-    short_name: str
-    abbreviation: str
-    registered: bool
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} - {self.results_version.name} - {self.results_version.election.name}"
 
-class PersistentCandidate:
-    person = models.ForeignKey('Person', on_delete=models.SET_NULL, blank=True, null=True)
+class PersistentParty(BaseModel):
+    party = models.OneToOneField(Party, on_delete=models.SET_NULL, blank=True, null=True)
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    abbreviation = models.TextField(blank=True, null=True)
+    colour = ColorField(blank=True, null=True)
+    display_name = models.TextField(blank=True, null=True)
+    short_name = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.display_name} - {self.abbreviation} - {self.colour}"
+    
+
+class ElectionParty(BaseModel):
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
+    persistent_party = models.ForeignKey(PersistentParty, on_delete=models.SET_NULL, blank=True, null=True)
+    number = models.IntegerField(validators=[MinValueValidator(1)])
+    name = models.TextField()
+    short_name = models.TextField(blank=True, null=True)
+    abbreviation = models.TextField(blank=True, null=True)
+    registered = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.results_version.name} - {self.results_version.election.name}"
+
+class PersistentCandidate(BaseModel):
+    person = models.OneToOneField('Person', on_delete=models.SET_NULL, blank=True, null=True)
     display_name = models.TextField()
+    firebase_id = models.TextField(blank=True, null=True)
 
 class ElectionCandidate(BaseModel):
-    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE)
-    name: models.TextField()
-    number: models.IntegerField(validators=[models.Min(1)])
-    electorate: models.ForeignKey(ElectionElectorate, on_delete=models.SET_NULL, blank=True, null=True)
-    party: models.ForeignKey(ElectionParty, on_delete=models.SET_NULL, blank=True, null=True)
-    list_pos: models.IntegerField(validators=[MinValueValidator(1)], blank=True, null=True)
-    is_dead: models.BooleanField(default=False)
-
-class ElectionVotingPlace(BaseModel):
-    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE)
+    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    persistent_candidate = models.ForeignKey(PersistentCandidate, on_delete=models.SET_NULL, blank=True, null=True)
+    name = models.TextField()
     number = models.IntegerField(validators=[MinValueValidator(1)])
-    physical_electorate = models.ForeignKey(ElectionElectorate, on_delete=models.CASCADE)
-    address = models.TextField()
-    latitude = models.FloatField()
-    longitude = models.FloatField()
+    electorate = models.ForeignKey(ElectionElectorate, on_delete=models.SET_NULL, blank=True, null=True)
+    party = models.ForeignKey(ElectionParty, on_delete=models.SET_NULL, blank=True, null=True)
+    list_pos = models.IntegerField(validators=[MinValueValidator(1)], blank=True, null=True)
+    is_dead = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        # Check electorate's results_version
+        if self.electorate and self.electorate.results_version_id != self.results_version_id:
+            raise ValueError(
+                f"ElectionCandidate.electorate (id={self.electorate_id}) belongs to results_version "
+                f"{self.electorate.results_version_id}, but this candidate is for results_version {self.results_version_id}"
+            )
+        # Check party's results_version
+        if self.party and self.party.results_version_id != self.results_version_id:
+            raise ValueError(
+                f"ElectionCandidate.party (id={self.party_id}) belongs to results_version "
+                f"{self.party.results_version_id}, but this candidate is for results_version {self.results_version_id}"
+            )
+        super().save(*args, **kwargs)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['results_version', 'number'], name='unique_results_version_candidate_number')
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.results_version.name} - {self.results_version.election.name}"
 
 class PersistentVotingPlace(BaseModel):
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
     latitude = models.FloatField()
     longitude = models.FloatField()
     address = models.TextField()
 
+    def __str__(self):
+        return f"{self.address} ({self.latitude}, {self.longitude})"
+
+class ElectionVotingPlace(BaseModel):
+    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    number = models.IntegerField(validators=[MinValueValidator(1)])
+    physical_electorate = models.ForeignKey(ElectionElectorate, on_delete=models.CASCADE)
+    persistent_voting_place = models.ForeignKey(PersistentVotingPlace, on_delete=models.SET_NULL, blank=True, null=True)
+    address = models.TextField()
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+
+    def save(self, *args, **kwargs):
+        # Check that the physical_electorate belongs to the same results_version
+        if self.physical_electorate and self.physical_electorate.results_version_id != self.results_version_id:
+            raise ValueError(
+                f"ElectionVotingPlace.physical_electorate (id={self.physical_electorate_id}) belongs to results_version "
+                f"{self.physical_electorate.results_version_id}, but this voting place is for results_version {self.results_version_id}"
+            )
+        super().save(*args, **kwargs)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['results_version', 'number'], name='unique_results_version_voting_place_number')
+        ]
+
+    def __str__(self):
+        return f"{self.number} - {self.physical_electorate.name} - {self.results_version.name} - {self.results_version.election.name}"
+
+
 class ResultsSet(BaseModel):
-    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE)
-    
+    results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+
     RESULTS_LEVEL_CHOICES = [
         ('national', 'National'),
         ('electorate', 'Electorate'),
@@ -133,8 +225,15 @@ class ResultsSet(BaseModel):
     def __str__(self):
         return f"{self.results_version.name} - {self.results_level} - {self.results_category}"
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+
 class Result(BaseModel):
     results_set = models.ForeignKey(ResultsSet, on_delete=models.CASCADE)
+    firebase_id = models.TextField(blank=True, null=True, unique=True)
+
     count = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
     per_cent = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(100)])
     candidate = models.ForeignKey(ElectionCandidate, on_delete=models.SET_NULL, blank=True, null=True)

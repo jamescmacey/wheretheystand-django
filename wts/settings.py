@@ -147,6 +147,14 @@ STORAGES = {
     },
 }
 
+# Firebase settings
+import json
+FIREBASE_CONFIG = os.getenv("FIREBASE_CONFIG")
+if FIREBASE_CONFIG:
+    FIREBASE_CONFIG = json.loads(FIREBASE_CONFIG)
+if not FIREBASE_CONFIG:
+    raise ValueError("FIREBASE_CONFIG is not set")
+
 BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; WhereTheyStand/2.0)") 
 
 STATIC_URL = f'https://{os.getenv("API_STATIC_CUSTOM_DOMAIN")}/'

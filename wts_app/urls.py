@@ -43,6 +43,9 @@ from .views import (
     VoteRetrieveUpdateDestroyView,
     VoteRecordListCreateView,
     VoteRecordRetrieveUpdateDestroyView,
+    PersistentDataDownloadView,
+    ResultsVersionReferenceDataView,
+    ElectionVersionListCreateView,
 )
 
 urlpatterns = [
@@ -93,9 +96,11 @@ urlpatterns = [
     path("gazette-notices/", GazetteNoticeListCreateView.as_view(), name="gazettenotice-list-create"),
     path("gazette-notices/<str:number>/", GazetteNoticeRetrieveUpdateDestroyView.as_view(), name="gazettenotice-detail"),
 
-    # Election endpoints
+    # Election endpoints (using election_results views for ID-only serialization)
     path("elections/", ElectionListCreateView.as_view(), name="election-list-create"),
-    path("elections/<slug:slug>/", ElectionRetrieveUpdateDestroyView.as_view(), name="election-detail"),
+    path("elections/<str:slug>/", ElectionRetrieveUpdateDestroyView.as_view(), name="election-detail"),
+    path("elections/<str:slug>/versions/", ElectionVersionListCreateView.as_view(), name="election-version-list-create"),
+    path("elections/<str:slug>/versions/<str:version_slug>/reference-data/", ResultsVersionReferenceDataView.as_view(), name="results-version-reference-data"),
 
     # Electorate endpoints
     path("electorates/", ElectorateListCreateView.as_view(), name="electorate-list-create"),
@@ -127,4 +132,7 @@ urlpatterns = [
     # VoteRecord endpoints
     path("vote-records/", VoteRecordListCreateView.as_view(), name="voterecord-list-create"),
     path("vote-records/<uuid:pk>/", VoteRecordRetrieveUpdateDestroyView.as_view(), name="voterecord-detail"),
+
+    # Election results endpoints
+    path("election-results/persistent-data/", PersistentDataDownloadView.as_view(), name="persistent-data-download"),
 ]
