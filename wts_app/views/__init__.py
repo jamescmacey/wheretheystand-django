@@ -15,3 +15,6 @@ from .documents import *  # Category, CopyrightParty, Licence, Document, File, D
 from .gazette import *  # GazetteNotice views
 from .financial_interests import *  # Financial interest views
 from .members_of_parliament import *  # Members of Parliament views
+from .banners import *  # Banner views
+from .bills import *  # Bill views
+from .votes import *  # Vote views
