@@ -18,3 +18,4 @@ from .members_of_parliament import *  # Members of Parliament views
 from .banners import *  # Banner views
 from .bills import *  # Bill views
 from .votes import *  # Vote views
+from .election_results import *  # Election results views
