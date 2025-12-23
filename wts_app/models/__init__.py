@@ -13,6 +13,9 @@ from .electorates import *  # Electorate
 from .parties import *  # Party and PartyBrandHistory
 from .parliaments import *  # Parliament
 from .elections import *  # Election
+from .banners import *  # Banner
+from .bills import *  # Bill
+from .votes import *  # Vote and VoteRecord
 
 # from .analytics import *  # Analytics/tracking models
 # from .relationships import *  # Many-to-many, foreign key relationships

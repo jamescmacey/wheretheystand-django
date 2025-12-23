@@ -35,6 +35,14 @@ from .views import (
     PersonFinancialInterestSnapshotListCreateView,
     PersonFinancialInterestSnapshotRetrieveUpdateDestroyView,
     MPListView,
+    BannerListCreateView,
+    BannerRetrieveUpdateDestroyView,
+    BillListCreateView,
+    BillRetrieveUpdateDestroyView,
+    VoteListCreateView,
+    VoteRetrieveUpdateDestroyView,
+    VoteRecordListCreateView,
+    VoteRecordRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -103,4 +111,20 @@ urlpatterns = [
 
     # Members of Parliament endpoints
     path("members-of-parliament/", MPListView.as_view(), name="members-of-parliament"),
+
+    # Banner endpoints
+    path("banners/", BannerListCreateView.as_view(), name="banner-list-create"),
+    path("banners/<uuid:pk>/", BannerRetrieveUpdateDestroyView.as_view(), name="banner-detail"),
+
+    # Bill endpoints
+    path("bills/", BillListCreateView.as_view(), name="bill-list-create"),
+    path("bills/<uuid:pk>/", BillRetrieveUpdateDestroyView.as_view(), name="bill-detail"),
+
+    # Vote endpoints
+    path("votes/", VoteListCreateView.as_view(), name="vote-list-create"),
+    path("votes/<uuid:pk>/", VoteRetrieveUpdateDestroyView.as_view(), name="vote-detail"),
+
+    # VoteRecord endpoints
+    path("vote-records/", VoteRecordListCreateView.as_view(), name="voterecord-list-create"),
+    path("vote-records/<uuid:pk>/", VoteRecordRetrieveUpdateDestroyView.as_view(), name="voterecord-detail"),
 ]

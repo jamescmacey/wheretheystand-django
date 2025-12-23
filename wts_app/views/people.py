@@ -13,6 +13,7 @@ from .parliaments import ParliamentSerializer
 from .electorates import ElectorateSerializer
 from .elections import ElectionSerializer
 from .gazette import GazetteNoticeSerializer
+from django.db.models import Q
 
 # Serializers
 class ParliamentaryAffiliationSerializer(serializers.ModelSerializer):
@@ -53,6 +54,17 @@ class PersonSerializer(serializers.ModelSerializer):
         fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'parliamentary_affiliations', 'party_affiliations', 'ministerial_affiliations']
 
 
+class ParliamentaryAffiliationFullSerializer(serializers.ModelSerializer):
+    parliament = ParliamentSerializer(read_only=True)
+    electorate = ElectorateSerializer(read_only=True)
+    election = ElectionSerializer(read_only=True)
+    gazette_notice_election = GazetteNoticeSerializer(read_only=True)
+    gazette_notice_vacation = GazetteNoticeSerializer(read_only=True)
+    person = PersonSimpleSerializer(read_only=True)
+    class Meta:
+        model = ParliamentaryAffiliation
+        fields = '__all__'
+
 # DRF Views
 class PersonListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
@@ -88,18 +100,73 @@ class PersonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     lookup_field = 'slug'  # Or 'slug' if you use slugs
 
 class ParliamentaryAffiliationListCreateView(generics.ListCreateAPIView):
-    queryset = ParliamentaryAffiliation.objects.all()
-    serializer_class = ParliamentaryAffiliationSerializer
+    serializer_class = ParliamentaryAffiliationFullSerializer
     pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        queryset = ParliamentaryAffiliation.objects.all()
+        electorate_slug = self.request.query_params.get('electorate')
+        parliament_number = self.request.query_params.get('parliament')
+
+        if electorate_slug:
+            queryset = queryset.filter(electorate__slug=electorate_slug)
+        if parliament_number:
+            queryset = queryset.filter(parliament__number=parliament_number)
+
+        return queryset
 
 class ParliamentaryAffiliationRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ParliamentaryAffiliation.objects.all()
-    serializer_class = ParliamentaryAffiliationSerializer
+    serializer_class = ParliamentaryAffiliationFullSerializer
     lookup_field = 'pk'
 
+
+
 class PartyAffiliationListCreateView(generics.ListCreateAPIView):
-    queryset = PartyAffiliation.objects.all()
+    """
+    Example usage:
+    GET /v2/party-affiliations/?person=alice-smith&person=bob-jones&date=2022-01-01&date=2023-02-10
+
+    This will return party affiliations for alice-smith at 2022-01-01 and bob-jones at 2023-02-10.
+    Each 'person' value should have a matching 'date' value in the same order.
+    """
     serializer_class = PartyAffiliationSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        from datetime import datetime
+
+        queryset = PartyAffiliation.objects.all()
+        people_param = self.request.query_params.getlist('person')
+        dates_param = self.request.query_params.getlist('date')
+
+        # If the filter params are present and valid, filter accordingly
+        if people_param and dates_param and len(people_param) == len(dates_param):
+            filtered_q = Q()
+            for person_slug, date_str in zip(people_param, dates_param):
+                try:
+                    # Validate that date_str is a valid date in YYYY-MM-DD format
+                    date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    # Filter for affiliations where:
+                    # - person__slug matches
+                    # - start_date <= date
+                    # - (end_date is null or end_date >= date)
+                    q = Q(
+                        person__slug=person_slug,
+                        start_date__lte=date,
+                    ) & (
+                        (Q(end_date__isnull=True)) | Q(end_date__gte=date)
+                    )
+                    filtered_q |= q
+                except Exception:
+                    continue  # If parsing/etc fails (invalid date string), skip entry
+
+            queryset = queryset.filter(filtered_q)
+        elif people_param or dates_param:
+            # If lists not the same length but one or both present, return empty queryset
+            return queryset.none()
+
+        return queryset
 
 class PartyAffiliationRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = PartyAffiliation.objects.all()
