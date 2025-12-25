@@ -41,7 +41,7 @@ class PersonSimpleSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Person
-        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour']
+        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'slug']
 
 class PersonSerializer(serializers.ModelSerializer):
     photo = SimpleFileSerializer(read_only=True)
@@ -51,7 +51,7 @@ class PersonSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Person
-        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'parliamentary_affiliations', 'party_affiliations', 'ministerial_affiliations']
+        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'slug', 'parliamentary_affiliations', 'party_affiliations', 'ministerial_affiliations']
 
 
 class ParliamentaryAffiliationFullSerializer(serializers.ModelSerializer):

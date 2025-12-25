@@ -41,7 +41,7 @@ class ElectionResultVersion(BaseModel):
 
     MODES = [("api", "API"),("firebase", "Firebase")]
     access_mode = models.CharField(max_length=20, choices=MODES, default="api")
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
     class Meta:
         unique_together = ('election', 'slug')
@@ -62,7 +62,7 @@ class ElectionResultVersion(BaseModel):
 
 class ElectionElectorate(BaseModel):
     results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     electorate = models.ForeignKey(Electorate, on_delete=models.SET_NULL, blank=True, null=True)
     number = models.IntegerField(validators=[MinValueValidator(1)])
     name = models.TextField()
@@ -80,7 +80,7 @@ class ElectionElectorate(BaseModel):
 
 class PersistentParty(BaseModel):
     party = models.OneToOneField(Party, on_delete=models.SET_NULL, blank=True, null=True)
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     abbreviation = models.TextField(blank=True, null=True)
     colour = ColorField(blank=True, null=True)
     display_name = models.TextField(blank=True, null=True)
@@ -91,7 +91,7 @@ class PersistentParty(BaseModel):
     
 
 class ElectionParty(BaseModel):
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
     persistent_party = models.ForeignKey(PersistentParty, on_delete=models.SET_NULL, blank=True, null=True)
     number = models.IntegerField(validators=[MinValueValidator(1)])
@@ -115,7 +115,7 @@ class PersistentCandidate(BaseModel):
 
 class ElectionCandidate(BaseModel):
     results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     persistent_candidate = models.ForeignKey(PersistentCandidate, on_delete=models.SET_NULL, blank=True, null=True)
     name = models.TextField()
     number = models.IntegerField(validators=[MinValueValidator(1)])
@@ -151,7 +151,7 @@ class ElectionCandidate(BaseModel):
         return f"{self.name} - {self.results_version.name} - {self.results_version.election.name}"
 
 class PersistentVotingPlace(BaseModel):
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     latitude = models.FloatField()
     longitude = models.FloatField()
     address = models.TextField()
@@ -161,7 +161,7 @@ class PersistentVotingPlace(BaseModel):
 
 class ElectionVotingPlace(BaseModel):
     results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     number = models.IntegerField(validators=[MinValueValidator(1)])
     physical_electorate = models.ForeignKey(ElectionElectorate, on_delete=models.CASCADE)
     persistent_voting_place = models.ForeignKey(PersistentVotingPlace, on_delete=models.SET_NULL, blank=True, null=True)
@@ -192,7 +192,7 @@ class ElectionVotingPlace(BaseModel):
 
 class ResultsSet(BaseModel):
     results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
+    firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
     RESULTS_LEVEL_CHOICES = [
         ('national', 'National'),
@@ -209,18 +209,33 @@ class ResultsSet(BaseModel):
         ]
     )
 
-    informals = models.IntegerField()
-    unknowns = models.IntegerField()
-    refused = models.IntegerField()
-    sample_size = models.IntegerField()
+    informals = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
+    unknowns = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
+    refused = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
+    sample_size = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
     updated = models.DateTimeField()
-    parsed = models.DateTimeField()
+    parsed = models.DateTimeField(null=True, blank=True)
     electorate = models.ForeignKey(ElectionElectorate, on_delete=models.CASCADE, blank=True, null=True)
     voting_place = models.ForeignKey(ElectionVotingPlace, on_delete=models.CASCADE, blank=True, null=True)
-    voting_place_number = models.IntegerField(validators=[MinValueValidator(1)], blank=True, null=True)
+    result_number = models.IntegerField(validators=[MinValueValidator(1)], blank=True, null=True)
     statistics = models.JSONField(null=True, blank=True)
     is_final = models.BooleanField(default=False)
     received = models.DateTimeField(null=True, blank=True)
+
+    total_voting_places_counted = models.IntegerField(null=True, blank=True, default=0)
+    percent_voting_places_counted = models.FloatField(null=True, blank=True, default=0)
+    total_votes_cast = models.IntegerField(null=True, blank=True, default=0)
+    percent_votes_cast = models.FloatField(null=True, blank=True, default=0)
+    total_electorates_final = models.IntegerField(null=True, blank=True, default=0)
+    percent_electorates_final = models.FloatField(null=True, blank=True, default=0)
+    total_minimal_votes = models.IntegerField(null=True, blank=True)
+    total_special_votes = models.IntegerField(null=True, blank=True)
+    total_registered_parties = models.IntegerField(null=True, blank=True, default=0)
+    total_voting_places = models.IntegerField(null=True, blank=True)
+    total_party_informals = models.IntegerField(null=True, blank=True)
+    total_candidate_informals = models.IntegerField(null=True, blank=True)
+    total_candidates = models.IntegerField(null=True, blank=True)
+    total_issued_ballot_papers = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.results_version.name} - {self.results_level} - {self.results_category}"
@@ -232,7 +247,6 @@ class ResultsSet(BaseModel):
 
 class Result(BaseModel):
     results_set = models.ForeignKey(ResultsSet, on_delete=models.CASCADE)
-    firebase_id = models.TextField(blank=True, null=True, unique=True)
 
     count = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
     per_cent = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(100)])
@@ -245,3 +259,19 @@ class Result(BaseModel):
     def __str__(self):
         return f"{self.results_set.results_version.name} - {self.results_set.results_level} - {self.results_set.results_category} - {self.candidate.name if self.candidate else self.party.name}"
 
+    def save(self, *args, **kwargs):
+        # Check that the candidate belongs to the same results_version
+        if self.candidate and self.candidate.results_version_id != self.results_set.results_version_id:
+            raise ValueError(
+                f"Result.candidate (id={self.candidate}) belongs to results_version "
+                f"{self.candidate.results_version_id}, but this result is for results_version {self.results_set.results_version_id}"
+            )
+
+        # Check that the party belongs to the same results_version
+        if self.party and self.party.results_version_id != self.results_set.results_version_id:
+            raise ValueError(
+                f"Result.party (id={self.party}) belongs to results_version "
+                f"{self.party.results_version_id}, but this result is for results_version {self.results_set.results_version_id}"
+            )
+
+        super().save(*args, **kwargs)
