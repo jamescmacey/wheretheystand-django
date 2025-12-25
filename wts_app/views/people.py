@@ -6,13 +6,14 @@ Views for Person, ParliamentaryAffiliation, PartyAffiliation, and MinisterialAff
 
 from rest_framework import generics
 from rest_framework import serializers
-from ..models import Person, ParliamentaryAffiliation, PartyAffiliation, MinisterialAffiliation
+from ..models import Person, ParliamentaryAffiliation, PartyAffiliation, MinisterialAffiliation, MinisterialPortfolio
 from .documents import SimpleFileSerializer
 from .base import StandardResultsSetPagination
 from .parliaments import ParliamentSerializer
 from .electorates import ElectorateSerializer
 from .elections import ElectionSerializer
 from .gazette import GazetteNoticeSerializer
+from .parties import PartySerializer
 from django.db.models import Q
 
 # Serializers
@@ -27,11 +28,19 @@ class ParliamentaryAffiliationSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class PartyAffiliationSerializer(serializers.ModelSerializer):
+    party = PartySerializer(read_only=True)
     class Meta:
         model = PartyAffiliation
         fields = '__all__'
 
+class MinisterialPortfolioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MinisterialPortfolio
+        fields = '__all__'
+
 class MinisterialAffiliationSerializer(serializers.ModelSerializer):
+    portfolio = MinisterialPortfolioSerializer(read_only=True)
+
     class Meta:
         model = MinisterialAffiliation
         fields = '__all__'
