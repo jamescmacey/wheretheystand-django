@@ -6,14 +6,7 @@ from django.db.models import Q, Prefetch
 from ..models import Person, ParliamentaryAffiliation, PartyAffiliation
 from .people import ParliamentaryAffiliationSerializer
 from .base import StandardResultsSetPagination
-
-
-class PartySerializer(serializers.ModelSerializer):
-    """Simple serializer for Party in nested contexts."""
-    class Meta:
-        from ..models import Party
-        model = Party
-        fields = '__all__'
+from .parties import PartySerializer
 
 
 class PartyAffiliationWithPartySerializer(serializers.ModelSerializer):
