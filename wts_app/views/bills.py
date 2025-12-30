@@ -37,6 +37,11 @@ class BillListCreateView(generics.ListCreateAPIView):
             'parliaments',
             'people_responsible',
         ).all()
+
+        # Optional ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering and ordering in ['introduction_date', '-introduction_date', 'name', '-name']:
+            queryset = queryset.order_by(ordering)
         
         # Optional filtering
         bill_type = self.request.query_params.get('bill_type', None)

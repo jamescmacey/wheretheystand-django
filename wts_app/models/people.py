@@ -158,6 +158,9 @@ class ParliamentaryAffiliation(BaseModel):
     end_reason = models.CharField(max_length=16, choices=END_REASONS, blank=True, null=True)
     start_reason = models.CharField(max_length=16, choices=START_REASONS, blank=True, null=True)
 
+    def __str__(self):
+        return f"{self.person.display_name} - {self.parliament.number} - {self.electorate.name if self.electorate else 'List'} - {self.start_reason if self.start_reason else ''} - {self.end_reason if self.end_reason else ''}"
+
 
 class PartyAffiliation(BaseModel):
     person = models.ForeignKey(Person,on_delete=models.CASCADE)

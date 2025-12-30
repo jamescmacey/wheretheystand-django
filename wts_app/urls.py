@@ -48,13 +48,17 @@ from .views import (
     ResultsVersionResultsView,
     ResultsVersionResultsByElectorateView,
     ResultsVersionResultsByVotingPlaceView,
-    PersonElectionResultsView
+    PersonElectionResultsView,
+    PersonTimelineView,
+    CreditCardReconciliationListCreateView,
+    CreditCardReconciliationRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
     # Person endpoints
     path("people/", PersonListCreateView.as_view(), name="person-list-create"),
     path("people/<slug:slug>/", PersonRetrieveUpdateDestroyView.as_view(), name="person-detail"),
+    path("people/<slug:slug>/timeline/", PersonTimelineView.as_view(), name="person-timeline"),
     path("people/<slug:slug>/election-results/", PersonElectionResultsView.as_view(), name="person-election-results"),
     path("people/<slug:slug>/financial-interests/", PersonFinancialInterestsView.as_view(), name="person-financial-interests"),
     path("people/<slug:slug>/financial-interests/latest/", PersonFinancialInterestLatestView.as_view(), name="person-financial-interests-latest"),
@@ -140,4 +144,8 @@ urlpatterns = [
     # VoteRecord endpoints
     path("vote-records/", VoteRecordListCreateView.as_view(), name="voterecord-list-create"),
     path("vote-records/<uuid:pk>/", VoteRecordRetrieveUpdateDestroyView.as_view(), name="voterecord-detail"),
+
+    # CreditCardReconciliation endpoints
+    path("credit-card-reconciliations/", CreditCardReconciliationListCreateView.as_view(), name="creditcardreconciliation-list-create"),
+    path("credit-card-reconciliations/<uuid:pk>/", CreditCardReconciliationRetrieveUpdateDestroyView.as_view(), name="creditcardreconciliation-detail"),
 ]

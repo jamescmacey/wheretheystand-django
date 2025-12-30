@@ -15,13 +15,15 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
-
+from django.urls import path, include, re_path
+from wts_app.redirects import login_view_redirect
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
-
+from django.shortcuts import redirect
 
 urlpatterns = [
-    path('', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('', lambda request: redirect('https://wheretheystand.nz')),
+    path('auth/', include('wts_app.auth_urls')),
+    re_path(r"^admin/login/", login_view_redirect),
     path('admin/', admin.site.urls),
     path('v2/', include('wts_app.urls')),
     path('schema/', SpectacularAPIView.as_view(), name='schema')
