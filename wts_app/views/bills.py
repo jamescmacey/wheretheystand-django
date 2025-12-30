@@ -16,7 +16,7 @@ class BillSimpleSerializer(serializers.ModelSerializer):
     """Simple serializer for bills with minimal fields."""
     class Meta:
         model = Bill
-        fields = ['id', 'name', 'ref', 'bill_type', 'status', 'introduction_date']
+        fields = ['id', 'name', 'ref', 'bill_type', 'status', 'introduction_date', 'last_activity_date']
 
 
 class BillSerializer(serializers.ModelSerializer):
@@ -40,8 +40,10 @@ class BillListCreateView(generics.ListCreateAPIView):
 
         # Optional ordering
         ordering = self.request.query_params.get('ordering', None)
-        if ordering and ordering in ['introduction_date', '-introduction_date', 'name', '-name']:
+        if ordering and ordering in ['introduction_date', '-introduction_date', 'name', '-name', 'last_activity_date', '-last_activity_date']:
             queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-last_activity_date')
         
         # Optional filtering
         bill_type = self.request.query_params.get('bill_type', None)

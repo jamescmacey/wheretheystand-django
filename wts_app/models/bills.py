@@ -13,6 +13,7 @@ class Bill(BaseModel):
     name = models.TextField()
     description = models.TextField(blank=True,null=True)
     retrieved_at = models.DateTimeField(blank=True, null=True)
+    last_activity_date = models.DateField(blank=True, null=True)
 
     parliament_document_id = models.TextField(blank=True,null=True)
     parliament_api_id = models.TextField(blank=True,null=True)
