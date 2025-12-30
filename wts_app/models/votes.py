@@ -17,7 +17,7 @@ class Vote(BaseModel):
     parliament_document_id = models.TextField(blank=True,null=True)
     retrieved_at = models.DateTimeField(blank=True, null=True)
 
-    bill = models.ForeignKey(Bill, on_delete=models.CASCADE)
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name='votes')
     date = models.DateField()
     reading = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(3)])
     ayes = models.IntegerField(validators=[MinValueValidator(0)])
@@ -54,7 +54,7 @@ class VoteRecord(BaseModel):
     A vote record.
     """
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
-    vote = models.ForeignKey(Vote, on_delete=models.CASCADE)
+    vote = models.ForeignKey(Vote, on_delete=models.CASCADE, related_name='vote_records')
     person = models.ForeignKey(Person, on_delete=models.PROTECT,blank=True, null=True)
     party = models.ForeignKey(Party, on_delete=models.PROTECT,blank=True, null=True)
 

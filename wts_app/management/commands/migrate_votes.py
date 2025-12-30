@@ -315,7 +315,7 @@ class Command(BaseCommand):
             vote = votes_dict[legacy_vote_id]
             vr_data['vote'] = vote
             
-            # Get party or person (one or the other)
+            # Get party or person
             if legacy_party_id:
                 if legacy_party_id not in parties_dict:
                     vote_records_skipped += 1
@@ -323,17 +323,12 @@ class Command(BaseCommand):
                     continue
                 vr_data['party'] = parties_dict[legacy_party_id]
                 vr_data['person'] = None
-            elif legacy_person_id:
+            if legacy_person_id:
                 if legacy_person_id not in people_dict:
                     vote_records_skipped += 1
                     self.stdout.write(self.style.WARNING(f"Vote record {legacy_id} has no valid legacy_person_id, skipping"))
                     continue
                 vr_data['person'] = people_dict[legacy_person_id]
-                vr_data['party'] = None
-            else:
-                vote_records_skipped += 1
-                self.stdout.write(self.style.WARNING(f"Vote record {legacy_id} has no valid legacy_party_id or legacy_person_id, skipping"))
-                continue
             
             if legacy_id in existing_vote_records:
                 # Update existing vote record

@@ -39,11 +39,17 @@ class VoteSimpleSerializer(serializers.ModelSerializer):
         model = Vote
         fields = ['id', 'bill', 'date', 'reading', 'ayes', 'noes', 'motion_agreed', 'vote_type']
 
+class VoteSimpleSerializerNoBill(serializers.ModelSerializer):
+    """Simple serializer for votes with minimal fields."""
+    class Meta:
+        model = Vote
+        fields = ['id', 'date', 'reading', 'ayes', 'noes', 'motion_agreed', 'vote_type']
+
 
 class VoteSerializer(serializers.ModelSerializer):
     """Full serializer for votes with all fields and related objects."""
     bill = BillSimpleSerializer(read_only=True)
-    vote_records = VoteRecordSerializer(many=True, read_only=True, source='voterecord_set')
+    vote_records = VoteRecordSerializer(many=True, read_only=True)
     
     class Meta:
         model = Vote
@@ -54,7 +60,7 @@ class VoteSerializer(serializers.ModelSerializer):
 class VoteListCreateView(generics.ListCreateAPIView):
     """List all votes or create a new vote."""
     def get_queryset(self):
-        queryset = Vote.objects.select_related('bill').prefetch_related('voterecord_set__person', 'voterecord_set__party').all()
+        queryset = Vote.objects.select_related('bill').prefetch_related('vote_records__person', 'vote_records__party').all()
         
         # Optional filtering
         bill_id = self.request.query_params.get('bill', None)
@@ -89,6 +95,15 @@ class VoteListCreateView(generics.ListCreateAPIView):
         if motion_agreed is not None:
             motion_agreed_bool = motion_agreed.lower() in ('true', '1', 'yes')
             queryset = queryset.filter(motion_agreed=motion_agreed_bool)
+
+        contains_split_party_votes = self.request.query_params.get('contains_split_party_votes', None)
+        if contains_split_party_votes is not None:
+            contains_split_party_votes_bool = contains_split_party_votes.lower() in ('true', '1', 'yes')
+            queryset = queryset.filter(contains_split_party_votes=contains_split_party_votes_bool)
+
+        person_slug = self.request.query_params.get('person_slug', None)
+        if person_slug:
+            queryset = queryset.filter(vote_records__person__slug=person_slug)
         
         return queryset
     
@@ -103,7 +118,7 @@ class VoteListCreateView(generics.ListCreateAPIView):
 class VoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a vote."""
     def get_queryset(self):
-        return Vote.objects.select_related('bill').prefetch_related('voterecord_set__person', 'voterecord_set__party').all()
+        return Vote.objects.select_related('bill').prefetch_related('vote_records__person', 'vote_records__party').all()
     
     serializer_class = VoteSerializer
     lookup_field = 'pk'  # Using UUID primary key

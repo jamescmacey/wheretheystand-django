@@ -19,3 +19,6 @@ from .banners import *  # Banner views
 from .bills import *  # Bill views
 from .votes import *  # Vote views
 from .election_results import *  # Election results views
+from .auth import *  # Auth views
+from .credit_card_expenses import *  # Credit card expenses views
+from .timeline import *  # Timeline views
