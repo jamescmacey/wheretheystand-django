@@ -25,9 +25,16 @@ class ElectionSerializer(serializers.ModelSerializer):
         model = Election
         fields = '__all__'
 
+class ElectionSimpleSerializer(serializers.ModelSerializer):
+    results_versions = ElectionResultVersionSerializer(read_only=True, many=True, source='electionresultversion_set')
+
+    class Meta:
+        model = Election
+        fields = '__all__'
+
 class ElectionListCreateView(generics.ListCreateAPIView):
     queryset = Election.objects.all()
-    serializer_class = ElectionSerializer
+    serializer_class = ElectionSimpleSerializer
 
 class ElectionRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Election.objects.all()
