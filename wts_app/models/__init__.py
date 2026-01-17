@@ -17,6 +17,7 @@ from .banners import *  # Banner
 from .bills import *  # Bill
 from .votes import *  # Vote and VoteRecord
 from .credit_card_expenses import *  # CreditCardReconciliation
+from .election_donation_returns import *  # ElectionDonationReturn
 
 # from .analytics import *  # Analytics/tracking models
 # from .relationships import *  # Many-to-many, foreign key relationships

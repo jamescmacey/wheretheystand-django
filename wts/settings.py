@@ -76,6 +76,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'wts.wsgi.application'
 
+# Axiom
+
+from opentelemetry.instrumentation.django import DjangoInstrumentor
+DjangoInstrumentor().instrument()
+
+
 # Spectacular settings
 
 SPECTACULAR_SETTINGS = {
