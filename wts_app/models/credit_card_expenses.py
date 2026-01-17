@@ -30,3 +30,27 @@ class CreditCardReconciliation(BaseModel):
     def __str__(self):
         return f"{self.person.display_name} - {self.start_date} to {self.end_date}"
 
+
+class CreditCardExpense(BaseModel):
+    """
+    Extracted credit card expense linked to a reconciliation.
+    """
+    reconciliation = models.ForeignKey(
+        CreditCardReconciliation,
+        on_delete=models.CASCADE,
+        related_name="expenses",
+    )
+    date = models.DateField()
+    merchant_name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    amount_nzd = models.DecimalField(max_digits=12, decimal_places=2)
+    original_currency_code = models.CharField(max_length=3)
+    original_amount = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        verbose_name_plural = "Credit card expenses"
+        ordering = ["-date", "merchant_name"]
+
+    def __str__(self):
+        return f"{self.merchant_name} - {self.amount_nzd} NZD on {self.date}"
+
