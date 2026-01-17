@@ -52,6 +52,8 @@ from .views import (
     PersonTimelineView,
     CreditCardReconciliationListCreateView,
     CreditCardReconciliationRetrieveUpdateDestroyView,
+    ElectionDonationReturnListCreateView,
+    ElectionDonationReturnRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -113,6 +115,10 @@ urlpatterns = [
     path("elections/<str:slug>/<str:version_slug>/results/", ResultsVersionResultsView.as_view(), name="results-version-results"),
     path("elections/<str:slug>/<str:version_slug>/results/by-electorate/<str:electorate_id>/", ResultsVersionResultsByElectorateView.as_view(), name="results-version-results-by-electorate"),
     path("elections/<str:slug>/<str:version_slug>/results/by-voting-place/<str:voting_place_id>/", ResultsVersionResultsByVotingPlaceView.as_view(), name="results-version-results-by-voting-place"),
+
+    # ElectionDonationReturn endpoints
+    path("election-donation-returns/", ElectionDonationReturnListCreateView.as_view(), name="electiondonationreturn-list-create"),
+    path("election-donation-returns/<uuid:pk>/", ElectionDonationReturnRetrieveUpdateDestroyView.as_view(), name="electiondonationreturn-detail"),
 
     # Electorate endpoints
     path("electorates/", ElectorateListCreateView.as_view(), name="electorate-list-create"),
