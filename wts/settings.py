@@ -175,6 +175,10 @@ if not FIREBASE_CONFIG:
 
 BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; WhereTheyStand/2.0)") 
 
+# Gemini settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+
 STATIC_URL = f'https://{os.getenv("API_STATIC_CUSTOM_DOMAIN")}/'
 
 # Email settings
