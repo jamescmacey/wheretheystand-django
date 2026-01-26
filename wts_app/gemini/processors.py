@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import mimetypes
 from dataclasses import dataclass
+import base64
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -83,6 +84,18 @@ class GeminiBatchProcessor:
         )
         return queryset.exclude(id__in=existing_ids)
 
+    @staticmethod
+    def _serialize_json_safe(value):
+        def _default(obj):
+            if isinstance(obj, (bytes, bytearray)):
+                return base64.b64encode(obj).decode("ascii")
+            return str(obj)
+
+        try:
+            return json.loads(json.dumps(value, default=_default))
+        except TypeError:
+            return json.loads(json.dumps(str(value)))
+
 
 class CreditCardReconciliationProcessor(GeminiBatchProcessor):
     """Gemini processor for credit card reconciliation files."""
@@ -93,6 +106,7 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
         "type": "object",
         "properties": {
             "request_id": {"type": "string"},
+            "concerns": {"type": ["string", "null"]},
             "expenses": {
                 "type": "array",
                 "items": {
@@ -149,10 +163,9 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
         config = types.GenerateContentConfig(
             temperature=0,
             system_instruction=(
-                "Return only JSON that matches the provided response schema."
+                "Return only JSON."
             ),
             response_mime_type="application/json",
-            response_json_schema=self.response_schema,
         )
 
         inlined_request = types.InlinedRequest(
@@ -187,7 +200,7 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
         error: Optional[types.JobError],
         raw_payload: dict,
     ) -> int:
-        item.response_payload = raw_payload
+        item.response_payload = self._serialize_json_safe(raw_payload)
         if error:
             item.status = GeminiBatchItem.Status.FAILED
             item.error_message = error.message or "Gemini response error."
@@ -204,9 +217,13 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
 
         data = self._parse_response_payload(response)
         expenses = data.get("expenses", [])
+        concerns = self._normalize_concerns(data.get("concerns"))
         reconciliation = item.content_object
 
         created_count = self._persist_expenses(reconciliation, expenses)
+        if concerns is not None and concerns != reconciliation.concerns:
+            reconciliation.concerns = concerns
+            reconciliation.save(update_fields=["concerns", "updated_at"])
         item.status = GeminiBatchItem.Status.PROCESSED
         item.processed_at = timezone.now()
         item.error_message = None
@@ -216,7 +233,11 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
     def _build_prompt(self, reconciliation: CreditCardReconciliation, request_id: str) -> str:
         return (
             "Extract every credit card transaction from the attached statement. "
-            "Return a JSON object that matches the response schema. "
+            "Explain any concerns with the data in a single sentence; if none, return null. "
+            "Return a JSON object with keys: "
+            "request_id (string), concerns (string or null), "
+            "expenses (array of objects with date, merchant_name, description, "
+            "amount_nzd, original_currency_code, original_amount). "
             "Use ISO dates (YYYY-MM-DD). "
             "If the original currency is NZD, set amount_nzd equal to original_amount. "
             "If amounts are missing, return null. "
@@ -224,6 +245,12 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
             f"Statement period: {reconciliation.start_date} to {reconciliation.end_date}. "
             f"Cardholder: {reconciliation.person.display_name}."
         )
+
+    def _normalize_concerns(self, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     def _resolve_mime_type(self, file_name: str, file_type: Optional[str]) -> str:
         if file_type:

@@ -1,3 +1,4 @@
+import json
 from typing import List
 
 from django.core.management.base import BaseCommand
@@ -7,6 +8,19 @@ from wts_app.gemini.client import GeminiClient
 from wts_app.gemini.processors import PROCESSOR_REGISTRY, get_processor
 from wts_app.gemini.utils import map_job_state, normalize_inlined_response, parse_jsonl_response
 from wts_app.models.gemini import GeminiBatchItem, GeminiBatchJob
+
+
+def _serialize_for_json_field(value):
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump(mode="json")
+        except TypeError:
+            value = value.model_dump()
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return json.loads(json.dumps(value, default=str))
 
 
 class Command(BaseCommand):
@@ -92,7 +106,7 @@ class Command(BaseCommand):
             job.resolved_model = batch_job.model or job.resolved_model
             job.last_checked_at = timezone.now()
             job.completed_at = batch_job.end_time or job.completed_at
-            job.raw_response = batch_job.model_dump()
+            job.raw_response = _serialize_for_json_field(batch_job)
             if batch_job.error:
                 job.error_message = batch_job.error.message
             if batch_job.dest and batch_job.dest.file_name:
@@ -143,6 +157,12 @@ class Command(BaseCommand):
                     job=job, status=GeminiBatchItem.Status.SUBMITTED
                 ).order_by("output_index")
             )
+            if not items:
+                items = list(
+                    GeminiBatchItem.objects.filter(
+                        job=job, status=GeminiBatchItem.Status.PENDING
+                    ).order_by("output_index")
+                )
             if not items:
                 self.stdout.write(self.style.WARNING(f"Job {job.id} has no pending items."))
                 continue
