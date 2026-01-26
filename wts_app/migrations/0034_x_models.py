@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='TwitterUser',
+            name='XUser',
             fields=[
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.CreateModel(
-            name='TwitterMetrics',
+            name='XMetrics',
             fields=[
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
@@ -37,17 +37,17 @@ class Migration(migrations.Migration):
                 ('tweet_count', models.IntegerField(blank=True, null=True)),
                 ('listed_count', models.IntegerField(blank=True, null=True)),
                 ('measured_at', models.DateTimeField(blank=True, null=True)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='wts_app.twitteruser')),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='wts_app.xuser')),
             ],
         ),
         migrations.AddField(
             model_name='party',
-            name='twitter_user',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='wts_app.twitteruser'),
+            name='x_user',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='wts_app.xuser'),
         ),
         migrations.AddField(
             model_name='person',
-            name='twitter_user',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='wts_app.twitteruser'),
+            name='x_user',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='wts_app.xuser'),
         ),
     ]
