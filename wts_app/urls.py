@@ -54,9 +54,13 @@ from .views import (
     CreditCardReconciliationRetrieveUpdateDestroyView,
     ElectionDonationReturnListCreateView,
     ElectionDonationReturnRetrieveUpdateDestroyView,
+    ClientHomepageView,
 )
 
 urlpatterns = [
+    # Client homepage endpoint
+    path("client/homepage/", ClientHomepageView.as_view(), name="client-homepage"),
+
     # Person endpoints
     path("people/", PersonListCreateView.as_view(), name="person-list-create"),
     path("people/<slug:slug>/", PersonRetrieveUpdateDestroyView.as_view(), name="person-detail"),
