@@ -30,7 +30,7 @@ class Person(BaseModel):
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
     cached_description = models.TextField(blank=True, null=True)
     cached_colour = ColorField(blank=True, null=True)
-    twitter_user = models.ForeignKey('TwitterUser', on_delete=models.SET_NULL, blank=True, null=True)
+    x_user = models.ForeignKey('XUser', on_delete=models.SET_NULL, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if not self.id or not self.slug:

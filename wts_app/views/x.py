@@ -1,33 +1,33 @@
 """
-Twitter views.
+X views.
 
-Views for TwitterUser and TwitterMetrics models.
+Views for XUser and XMetrics models.
 """
 
 from rest_framework import generics, serializers
 
-from ..models import TwitterMetrics, TwitterUser
+from ..models import XMetrics, XUser
 from .base import StandardResultsSetPagination
 
 
-class TwitterUserSerializer(serializers.ModelSerializer):
+class XUserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = TwitterUser
+        model = XUser
         fields = '__all__'
 
 
-class TwitterMetricsSerializer(serializers.ModelSerializer):
+class XMetricsSerializer(serializers.ModelSerializer):
     class Meta:
-        model = TwitterMetrics
+        model = XMetrics
         fields = '__all__'
 
 
-class TwitterUserListCreateView(generics.ListCreateAPIView):
-    serializer_class = TwitterUserSerializer
+class XUserListCreateView(generics.ListCreateAPIView):
+    serializer_class = XUserSerializer
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        queryset = TwitterUser.objects.all()
+        queryset = XUser.objects.all()
         user_id = self.request.query_params.get('user_id')
         if user_id:
             queryset = queryset.filter(user_id=user_id)
@@ -37,18 +37,18 @@ class TwitterUserListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class TwitterUserRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = TwitterUser.objects.all()
-    serializer_class = TwitterUserSerializer
+class XUserRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = XUser.objects.all()
+    serializer_class = XUserSerializer
     lookup_field = 'pk'
 
 
-class TwitterMetricsListCreateView(generics.ListCreateAPIView):
-    serializer_class = TwitterMetricsSerializer
+class XMetricsListCreateView(generics.ListCreateAPIView):
+    serializer_class = XMetricsSerializer
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        queryset = TwitterMetrics.objects.select_related('user').all()
+        queryset = XMetrics.objects.select_related('user').all()
         user_id = self.request.query_params.get('user')
         if user_id:
             queryset = queryset.filter(user_id=user_id)
@@ -58,9 +58,9 @@ class TwitterMetricsListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class TwitterMetricsRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = TwitterMetricsSerializer
+class XMetricsRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = XMetricsSerializer
     lookup_field = 'pk'
 
     def get_queryset(self):
-        return TwitterMetrics.objects.select_related('user').all()
+        return XMetrics.objects.select_related('user').all()
