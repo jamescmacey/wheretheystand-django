@@ -54,6 +54,10 @@ from .views import (
     CreditCardReconciliationRetrieveUpdateDestroyView,
     ElectionDonationReturnListCreateView,
     ElectionDonationReturnRetrieveUpdateDestroyView,
+    TwitterUserListCreateView,
+    TwitterUserRetrieveUpdateDestroyView,
+    TwitterMetricsListCreateView,
+    TwitterMetricsRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -154,4 +158,10 @@ urlpatterns = [
     # CreditCardReconciliation endpoints
     path("credit-card-reconciliations/", CreditCardReconciliationListCreateView.as_view(), name="creditcardreconciliation-list-create"),
     path("credit-card-reconciliations/<uuid:pk>/", CreditCardReconciliationRetrieveUpdateDestroyView.as_view(), name="creditcardreconciliation-detail"),
+
+    # Twitter endpoints
+    path("twitter-users/", TwitterUserListCreateView.as_view(), name="twitteruser-list-create"),
+    path("twitter-users/<uuid:pk>/", TwitterUserRetrieveUpdateDestroyView.as_view(), name="twitteruser-detail"),
+    path("twitter-metrics/", TwitterMetricsListCreateView.as_view(), name="twittermetrics-list-create"),
+    path("twitter-metrics/<uuid:pk>/", TwitterMetricsRetrieveUpdateDestroyView.as_view(), name="twittermetrics-detail"),
 ]
