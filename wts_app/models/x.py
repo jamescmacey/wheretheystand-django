@@ -1,7 +1,7 @@
 """
-Twitter models.
+X models.
 
-Models for Twitter users and their metrics snapshots.
+Models for X users and their metrics snapshots.
 """
 
 from django.db import models
@@ -9,7 +9,7 @@ from django.db import models
 from .base import BaseModel
 
 
-class TwitterUser(BaseModel):
+class XUser(BaseModel):
     user_id = models.TextField()
     name = models.TextField()
     username = models.TextField()
@@ -21,8 +21,8 @@ class TwitterUser(BaseModel):
         return f"{self.username} ({self.name})"
 
 
-class TwitterMetrics(BaseModel):
-    user = models.ForeignKey(TwitterUser, on_delete=models.CASCADE)
+class XMetrics(BaseModel):
+    user = models.ForeignKey(XUser, on_delete=models.CASCADE)
     followers_count = models.IntegerField(blank=True, null=True)
     following_count = models.IntegerField(blank=True, null=True)
     tweet_count = models.IntegerField(blank=True, null=True)

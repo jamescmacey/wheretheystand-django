@@ -59,7 +59,7 @@ class PersonSimpleSerializer(serializers.ModelSerializer):
             'cached_description',
             'cached_colour',
             'slug',
-            'twitter_user',
+            'x_user',
         ]
 
 class PersonSerializer(serializers.ModelSerializer):
@@ -79,7 +79,7 @@ class PersonSerializer(serializers.ModelSerializer):
             'cached_description',
             'cached_colour',
             'slug',
-            'twitter_user',
+            'x_user',
             'parliamentary_affiliations',
             'party_affiliations',
             'ministerial_affiliations',
@@ -108,7 +108,7 @@ class PersonListCreateView(generics.ListCreateAPIView):
             'parliamentaryaffiliation_set__gazette_notice_vacation',
             'partyaffiliation_set__party',
             'ministerialaffiliation_set__portfolio',
-        ).select_related('photo', 'twitter_user')
+        ).select_related('photo', 'x_user')
     
     def get_serializer_class(self):
         if self.request and self.request.method == "GET":
@@ -126,7 +126,7 @@ class PersonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             'parliamentaryaffiliation_set__gazette_notice_vacation',
             'partyaffiliation_set__party',
             'ministerialaffiliation_set__portfolio',
-        ).select_related('photo', 'twitter_user')
+        ).select_related('photo', 'x_user')
     
     serializer_class = PersonSerializer
     lookup_field = 'slug'  # Or 'slug' if you use slugs

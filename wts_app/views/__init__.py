@@ -23,4 +23,4 @@ from .auth import *  # Auth views
 from .credit_card_expenses import *  # Credit card expenses views
 from .timeline import *  # Timeline views
 from .election_donation_returns import *  # Election donation returns views
-from .twitter import *  # Twitter views
+from .x import *  # X views
