@@ -54,6 +54,10 @@ from .views import (
     CreditCardReconciliationRetrieveUpdateDestroyView,
     ElectionDonationReturnListCreateView,
     ElectionDonationReturnRetrieveUpdateDestroyView,
+    XUserListCreateView,
+    XUserRetrieveUpdateDestroyView,
+    XMetricsListCreateView,
+    XMetricsRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -154,4 +158,10 @@ urlpatterns = [
     # CreditCardReconciliation endpoints
     path("credit-card-reconciliations/", CreditCardReconciliationListCreateView.as_view(), name="creditcardreconciliation-list-create"),
     path("credit-card-reconciliations/<uuid:pk>/", CreditCardReconciliationRetrieveUpdateDestroyView.as_view(), name="creditcardreconciliation-detail"),
+
+    # X endpoints
+    path("x-users/", XUserListCreateView.as_view(), name="xuser-list-create"),
+    path("x-users/<uuid:pk>/", XUserRetrieveUpdateDestroyView.as_view(), name="xuser-detail"),
+    path("x-metrics/", XMetricsListCreateView.as_view(), name="xmetrics-list-create"),
+    path("x-metrics/<uuid:pk>/", XMetricsRetrieveUpdateDestroyView.as_view(), name="xmetrics-detail"),
 ]

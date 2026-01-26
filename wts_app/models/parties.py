@@ -22,6 +22,7 @@ class Party(BaseModel):
     abbreviation = models.CharField(max_length=20, unique=True)
     color = ColorField(blank=True, null=True)
     slug = models.SlugField(unique=True,blank=True,null=True)
+    x_user = models.ForeignKey('XUser', on_delete=models.SET_NULL, blank=True, null=True)
 
     party_leader_role = models.TextField(default="Leader")
     party_leader_role_plural = models.TextField(default="Leaders")
