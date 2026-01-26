@@ -50,7 +50,17 @@ class PersonSimpleSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Person
-        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'slug']
+        fields = [
+            'id',
+            'first_name',
+            'last_name',
+            'display_name',
+            'photo',
+            'cached_description',
+            'cached_colour',
+            'slug',
+            'twitter_user',
+        ]
 
 class PersonSerializer(serializers.ModelSerializer):
     photo = SimpleFileSerializer(read_only=True)
@@ -60,7 +70,20 @@ class PersonSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Person
-        fields = ['id', 'first_name', 'last_name', 'display_name', 'photo', 'cached_description', 'cached_colour', 'slug', 'parliamentary_affiliations', 'party_affiliations', 'ministerial_affiliations']
+        fields = [
+            'id',
+            'first_name',
+            'last_name',
+            'display_name',
+            'photo',
+            'cached_description',
+            'cached_colour',
+            'slug',
+            'twitter_user',
+            'parliamentary_affiliations',
+            'party_affiliations',
+            'ministerial_affiliations',
+        ]
 
 
 class ParliamentaryAffiliationFullSerializer(serializers.ModelSerializer):
@@ -85,7 +108,7 @@ class PersonListCreateView(generics.ListCreateAPIView):
             'parliamentaryaffiliation_set__gazette_notice_vacation',
             'partyaffiliation_set__party',
             'ministerialaffiliation_set__portfolio',
-        ).select_related('photo')
+        ).select_related('photo', 'twitter_user')
     
     def get_serializer_class(self):
         if self.request and self.request.method == "GET":
@@ -103,7 +126,7 @@ class PersonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             'parliamentaryaffiliation_set__gazette_notice_vacation',
             'partyaffiliation_set__party',
             'ministerialaffiliation_set__portfolio',
-        ).select_related('photo')
+        ).select_related('photo', 'twitter_user')
     
     serializer_class = PersonSerializer
     lookup_field = 'slug'  # Or 'slug' if you use slugs
