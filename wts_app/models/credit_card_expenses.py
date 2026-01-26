@@ -22,6 +22,7 @@ class CreditCardReconciliation(BaseModel):
     start_date = models.DateField()
     end_date = models.DateField()
     hidden_from_timeline = models.BooleanField(default=False)
+    concerns = models.TextField(blank=True, null=True)
 
     class Meta:
         verbose_name_plural = "Credit card reconciliations"

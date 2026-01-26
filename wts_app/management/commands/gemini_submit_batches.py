@@ -1,4 +1,5 @@
 import itertools
+import json
 from typing import Iterable, List
 
 from django.conf import settings
@@ -27,6 +28,19 @@ def _parse_ids(raw_ids: List[str]) -> List[str]:
     for raw in raw_ids:
         ids.extend([part.strip() for part in raw.split(",") if part.strip()])
     return ids
+
+
+def _serialize_for_json_field(value):
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump(mode="json")
+        except TypeError:
+            value = value.model_dump()
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return json.loads(json.dumps(value, default=str))
 
 
 class Command(BaseCommand):
@@ -184,7 +198,7 @@ class Command(BaseCommand):
             job.batch_name = batch_job.name
             job.resolved_model = batch_job.model or job.resolved_model
             job.status = map_job_state(batch_job.state)
-            job.raw_response = batch_job.model_dump()
+            job.raw_response = _serialize_for_json_field(batch_job)
             job.submitted_at = timezone.now()
             if batch_job.dest and batch_job.dest.file_name:
                 job.output_file_name = batch_job.dest.file_name

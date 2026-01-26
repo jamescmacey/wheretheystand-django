@@ -5,7 +5,7 @@ Views for CreditCardReconciliation.
 """
 
 from rest_framework import generics, serializers
-from ..models.credit_card_expenses import CreditCardReconciliation
+from ..models.credit_card_expenses import CreditCardReconciliation, CreditCardExpense
 from ..models.people import Person
 from .base import StandardResultsSetPagination
 from .documents import FileSerializer
@@ -18,16 +18,21 @@ class PersonSimpleSerializer(serializers.ModelSerializer):
         model = Person
         fields = ['id', 'display_name', 'slug', 'first_name', 'last_name']
 
+class CreditCardExpenseSerializer(serializers.ModelSerializer):
+    """Serializer for CreditCardExpense."""
+    class Meta:
+        model = CreditCardExpense
+        fields = '__all__'
 
 class CreditCardReconciliationSerializer(serializers.ModelSerializer):
     """Serializer for CreditCardReconciliation."""
     person = PersonSimpleSerializer(read_only=True)
     file = FileSerializer(read_only=True)
+    expenses = CreditCardExpenseSerializer(many=True, read_only=True)
     
     class Meta:
         model = CreditCardReconciliation
         fields = '__all__'
-
 
 # DRF Views
 class CreditCardReconciliationListCreateView(generics.ListCreateAPIView):
@@ -92,7 +97,7 @@ class CreditCardReconciliationListCreateView(generics.ListCreateAPIView):
 
 class CreditCardReconciliationRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update, or delete a credit card reconciliation."""
-    queryset = CreditCardReconciliation.objects.select_related('person', 'file').all()
+    queryset = CreditCardReconciliation.objects.select_related('person', 'file', 'expenses').all()
     serializer_class = CreditCardReconciliationSerializer
     lookup_field = 'pk'
 
