@@ -5,7 +5,7 @@ from django.db.models import Q, Prefetch
 
 from ..models import Person, ParliamentaryAffiliation, PartyAffiliation
 from .people import ParliamentaryAffiliationSerializer
-from .base import StandardResultsSetPagination
+from .base import MPListPagination
 from .parties import PartySerializer
 
 
@@ -68,13 +68,15 @@ class MPSerializer(serializers.ModelSerializer):
 
 class MPListView(generics.ListAPIView):
     serializer_class = MPSerializer
-    pagination_class = StandardResultsSetPagination
+    pagination_class = MPListPagination
 
     def get_queryset(self):
         """
-        Supports two query params:
+        Supports query params:
           - as_at (YYYY-MM-DD): date to check membership (default: today)
           - using (sworn_date|elected_date): which date field to use for membership period (default: sworn_date)
+          - party_slug (optional): only return MPs whose current party affiliation
+            at as_at date has this party slug.
         """
         # Get query params
         from django.utils.dateparse import parse_date
@@ -84,6 +86,7 @@ class MPListView(generics.ListAPIView):
 
         as_at_param = request.query_params.get("as_at")
         using = request.query_params.get("using", "sworn_date")
+        party_slug = request.query_params.get("party_slug")
         if as_at_param:
             as_at = parse_date(as_at_param)
             if as_at is None:
@@ -119,22 +122,35 @@ class MPListView(generics.ListAPIView):
         )
         
         # Prefetch current party affiliations with party details
+        party_filter = Q(start_date__lte=as_at) & (Q(end_date__isnull=True) | Q(end_date__gte=as_at))
+        if party_slug:
+            party_filter &= Q(party__slug=party_slug)
+
         party_prefetch = Prefetch(
             'partyaffiliation_set',
-            queryset=PartyAffiliation.objects.filter(
-                Q(start_date__lte=as_at) & (Q(end_date__isnull=True) | Q(end_date__gte=as_at))
-            )
+            queryset=PartyAffiliation.objects.filter(party_filter)
             .select_related('party')
             .order_by('-start_date'),
             to_attr='_current_party_affiliations'
         )
         
-        # Query for People who have a ParliamentaryAffiliation at as_at
-        # We'll filter by getting distinct persons from the parliamentary affiliations
-        person_ids = ParliamentaryAffiliation.objects.filter(current_parliamentary_filter).values_list('person_id', flat=True).distinct()
+        # Query for people who are MPs at as_at.
+        parliamentary_person_ids = ParliamentaryAffiliation.objects.filter(
+            current_parliamentary_filter
+        ).values_list('person_id', flat=True).distinct()
+
+        # Optionally constrain to one current party by slug.
+        if party_slug:
+            party_person_ids = PartyAffiliation.objects.filter(
+                party_filter
+            ).values_list('person_id', flat=True).distinct()
+            person_ids = parliamentary_person_ids.filter(person_id__in=party_person_ids)
+        else:
+            person_ids = parliamentary_person_ids
         
         # Get Person objects with prefetched affiliations
         queryset = Person.objects.filter(id__in=person_ids)\
+            .order_by('last_name', 'first_name')\
             .prefetch_related(parliamentary_prefetch, party_prefetch)\
             .select_related('photo')
         

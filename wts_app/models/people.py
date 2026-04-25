@@ -158,6 +158,9 @@ class ParliamentaryAffiliation(BaseModel):
     end_reason = models.CharField(max_length=16, choices=END_REASONS, blank=True, null=True)
     start_reason = models.CharField(max_length=16, choices=START_REASONS, blank=True, null=True)
 
+    class Meta:
+        ordering = ['parliament__number', 'person__last_name']
+
     def __str__(self):
         return f"{self.person.display_name} - {self.parliament.number} - {self.electorate.name if self.electorate else 'List'} - {self.start_reason if self.start_reason else ''} - {self.end_reason if self.end_reason else ''}"
 
@@ -172,6 +175,14 @@ class PartyAffiliation(BaseModel):
     def __str__(self):
         return self.person.display_name + " " + self.party.display_name
 
+class PartyLeader(BaseModel):
+    person = models.ForeignKey(Person,on_delete=models.CASCADE)
+    start_date = models.DateField()
+    end_date = models.DateField(blank=True,null=True)
+    party = models.ForeignKey(Party,on_delete=models.CASCADE)
+
+    def __str__(self):
+        return self.person.display_name + " " + self.party.display_name
 
 class MinisterialPortfolio(BaseModel):
     name = models.TextField()

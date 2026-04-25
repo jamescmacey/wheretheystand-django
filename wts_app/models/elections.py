@@ -113,6 +113,12 @@ class PersistentCandidate(BaseModel):
     display_name = models.TextField()
     firebase_id = models.TextField(blank=True, null=True)
 
+    def __str__(self):
+        return f"{self.display_name}"
+
+    class Meta:
+        ordering = ['display_name']
+
 class ElectionCandidate(BaseModel):
     results_version = models.ForeignKey(ElectionResultVersion, on_delete=models.CASCADE, db_index=True)
     firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)

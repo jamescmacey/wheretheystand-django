@@ -19,6 +19,7 @@ from django.urls import path, include, re_path
 from wts_app.redirects import login_view_redirect
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from django.shortcuts import redirect
+from django.templatetags.static import static
 
 urlpatterns = [
     path('', lambda request: redirect('https://wheretheystand.nz')),
@@ -26,5 +27,6 @@ urlpatterns = [
     re_path(r"^admin/login/", login_view_redirect),
     path('admin/', admin.site.urls),
     path('v2/', include('wts_app.urls')),
-    path('schema/', SpectacularAPIView.as_view(), name='schema')
+    path('schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('favicon.ico', lambda request: redirect(static("favicon.ico"))),
 ]

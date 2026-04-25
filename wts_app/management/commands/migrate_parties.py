@@ -32,14 +32,14 @@ class Command(BaseCommand):
                 return False
             return str(value).strip() in ('1', 'true', 'True', 'TRUE')
 
-        def parse_color(color_str):
-            """Parse color, adding # if not present."""
-            if not color_str:
+        def parse_colour(colour_str):
+            """Parse colour, adding # if not present."""
+            if not colour_str:
                 return None
-            color_str = color_str.strip()
-            if color_str and not color_str.startswith('#'):
-                return f"#{color_str}"
-            return color_str
+            colour_str = colour_str.strip()
+            if colour_str and not colour_str.startswith('#'):
+                return f"#{colour_str}"
+            return colour_str
 
         with open(csv_path, mode='r', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
@@ -67,7 +67,7 @@ class Command(BaseCommand):
                 deregistered_date = parse_date(row.get('deregistered_date', '').strip())
                 slug = row.get('slug', '').strip() or None
                 color_str = row.get('colour_without_hash', '').strip()
-                color = parse_color(color_str)
+                colour = parse_colour(color_str)
                 is_registered = parse_boolean(row.get('is_registered', '').strip())
                 registration_dates_precise = parse_boolean(row.get('registration_dates_precise', '').strip())
                 party_leader_role = row.get('party_leader_role', '').strip() or 'Leader'
@@ -83,7 +83,7 @@ class Command(BaseCommand):
                         'registered_date': registered_date,
                         'deregistered_date': deregistered_date,
                         'slug': slug,
-                        'color': color,
+                        'colour': colour,
                         'is_registered': is_registered,
                         'registration_dates_precise': registration_dates_precise,
                         'party_leader_role': party_leader_role,

@@ -43,6 +43,7 @@ class Electorate(BaseModel):
 class ElectorateBoundarySet(BaseModel):
     gazette_notice = models.ForeignKey(GazetteNotice, on_delete=models.SET_NULL, blank=True, null=True)
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="electorate_boundary_sets")
+    valid_from = models.DateField()
 
     def __str__(self):
         if self.document:
@@ -56,3 +57,10 @@ class ElectorateBoundary(BaseModel):
     electorate = models.ForeignKey(Electorate, on_delete=models.CASCADE)
     boundary_set = models.ForeignKey(ElectorateBoundarySet, on_delete=models.CASCADE)
     shape = models.ForeignKey(File, on_delete=models.CASCADE, related_name="electorate_boundaries")
+    simplified_shape = models.ForeignKey(
+        File,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="electorate_boundaries_simplified",
+    )
