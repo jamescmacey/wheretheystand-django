@@ -92,7 +92,7 @@ class Command(BaseCommand):
             
             if party_affiliation:
                 party_name = party_affiliation.party.display_name
-                colour = party_affiliation.party.color
+                colour = party_affiliation.party.colour
             else:
                 party_name = "Independent"
                 colour = None

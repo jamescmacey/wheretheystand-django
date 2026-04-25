@@ -20,7 +20,7 @@ class Party(BaseModel):
     display_name = models.CharField(max_length=200)
     short_name = models.CharField(max_length=100)
     abbreviation = models.CharField(max_length=20, unique=True)
-    color = ColorField(blank=True, null=True)
+    colour = ColorField(blank=True, null=True)
     slug = models.SlugField(unique=True,blank=True,null=True)
 
     party_leader_role = models.TextField(default="Leader")
@@ -44,8 +44,8 @@ class Party(BaseModel):
             self.slug = slugify(self.display_name)
         super(Party, self).save(*args, **kwargs)
 
-    def change_name(self, legal_name=None, display_name=None, short_name=None, 
-                   abbreviation=None, color=None, effective_date=None):
+    def change_name(self, legal_name=None, display_name=None, short_name=None,
+                   abbreviation=None, colour=None, effective_date=None):
         """
         Helper method to change name(s) and record history.
         Only provided fields will be updated.
@@ -58,7 +58,7 @@ class Party(BaseModel):
         old_display_name = self.display_name
         old_short_name = self.short_name
         old_abbreviation = self.abbreviation
-        old_color = self.color
+        old_colour = self.colour
 
         # Check if any name is actually changing
         name_changed = (
@@ -66,7 +66,7 @@ class Party(BaseModel):
             (display_name is not None and display_name != old_display_name) or
             (short_name is not None and short_name != old_short_name) or
             (abbreviation is not None and abbreviation != old_abbreviation) or
-            (color is not None and color != old_color)
+            (colour is not None and colour != old_colour)
         )
         
         if name_changed:
@@ -77,7 +77,7 @@ class Party(BaseModel):
                 display_name=old_display_name,
                 short_name=old_short_name,
                 abbreviation=old_abbreviation,
-                color=old_color,
+                colour=old_colour,
                 effective_until=effective_date
             )
             
@@ -90,8 +90,8 @@ class Party(BaseModel):
                 self.short_name = short_name
             if abbreviation is not None:
                 self.abbreviation = abbreviation
-            if color is not None:
-                self.color = color
+            if colour is not None:
+                self.colour = colour
             self.save()
 
 

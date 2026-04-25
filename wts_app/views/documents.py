@@ -49,6 +49,12 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = Document
         fields = ['id', 'name', 'description', 'files']
 
+
+class SimpleDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Document
+        fields = ['id', 'name', 'description']
+
 class DocumentCollectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentCollection

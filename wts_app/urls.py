@@ -26,10 +26,11 @@ from .views import (
     ElectionRetrieveUpdateDestroyView,
     ElectorateListCreateView,
     ElectorateRetrieveUpdateDestroyView,
+    ElectorateHistoryView,
     ElectorateBoundarySetListCreateView,
     ElectorateBoundarySetRetrieveUpdateDestroyView,
-    ElectorateBoundaryListCreateView,
     ElectorateBoundaryRetrieveUpdateDestroyView,
+    ElectorateBoundariesByElectorateView,
     PersonFinancialInterestsView,
     PersonFinancialInterestLatestView,
     PersonFinancialInterestSnapshotListCreateView,
@@ -54,9 +55,16 @@ from .views import (
     CreditCardReconciliationRetrieveUpdateDestroyView,
     ElectionDonationReturnListCreateView,
     ElectionDonationReturnRetrieveUpdateDestroyView,
+    PartyListCreateView,
+    PartyRetrieveUpdateDestroyView,
+    ParliamentListCreateView,
+    ParliamentRetrieveUpdateDestroyView,
 )
 
-urlpatterns = [
+from django.templatetags.static import static
+from django.shortcuts import redirect
+
+urlpatterns = [    
     # Person endpoints
     path("people/", PersonListCreateView.as_view(), name="person-list-create"),
     path("people/<slug:slug>/", PersonRetrieveUpdateDestroyView.as_view(), name="person-detail"),
@@ -120,16 +128,26 @@ urlpatterns = [
     path("election-donation-returns/", ElectionDonationReturnListCreateView.as_view(), name="electiondonationreturn-list-create"),
     path("election-donation-returns/<uuid:pk>/", ElectionDonationReturnRetrieveUpdateDestroyView.as_view(), name="electiondonationreturn-detail"),
 
+    # Party endpoints (political Party model)
+    path("parties/", PartyListCreateView.as_view(), name="party-list-create"),
+    path("parties/<slug:slug>/", PartyRetrieveUpdateDestroyView.as_view(), name="party-detail"),
+
+    # Parliament endpoints
+    path("parliaments/", ParliamentListCreateView.as_view(), name="parliament-list-create"),
+    path("parliaments/<int:number>/", ParliamentRetrieveUpdateDestroyView.as_view(), name="parliament-detail"),
+
     # Electorate endpoints
     path("electorates/", ElectorateListCreateView.as_view(), name="electorate-list-create"),
     path("electorates/<slug:slug>/", ElectorateRetrieveUpdateDestroyView.as_view(), name="electorate-detail"),
+    path("electorates/<slug:slug>/history/", ElectorateHistoryView.as_view(), name="electorate-history"),
+    path("electorates/<slug:slug>/boundaries/", ElectorateBoundariesByElectorateView.as_view(), name="electorate-boundaries-by-electorate"),
 
     # ElectorateBoundarySet endpoints
     path("electorate-boundary-sets/", ElectorateBoundarySetListCreateView.as_view(), name="electorateboundaryset-list-create"),
     path("electorate-boundary-sets/<uuid:pk>/", ElectorateBoundarySetRetrieveUpdateDestroyView.as_view(), name="electorateboundaryset-detail"),
 
     # ElectorateBoundary endpoints
-    path("electorate-boundaries/", ElectorateBoundaryListCreateView.as_view(), name="electorateboundary-list-create"),
+    path("electorate-boundaries/", ElectorateBoundarySetListCreateView.as_view(), name="electorateboundaryset-list-via-boundaries"),
     path("electorate-boundaries/<uuid:pk>/", ElectorateBoundaryRetrieveUpdateDestroyView.as_view(), name="electorateboundary-detail"),
 
     # Members of Parliament endpoints
