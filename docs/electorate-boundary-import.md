@@ -1,5 +1,5 @@
 ---
-title: Electorate boundary import (GeoJSON worksheet and upload)
+title: Electorate boundary import
 description: Prepare GeometryCollection GeoJSON, build the mapping worksheet, and upload boundaries via management commands.
 aiAssistedGeneration: true
 ---
@@ -17,7 +17,7 @@ Run commands from the Django project directory with `python manage.py …`.
 
 ::steps{level="2"}
 
-## 1) Shapefile to GeoJSON and simplification (mapshaper.org)
+## Shapefile to GeoJSON and simplification (mapshaper.org)
 
 Use [mapshaper.org](https://mapshaper.org/) to convert and simplify geometries.
 
@@ -40,9 +40,7 @@ Use [mapshaper.org](https://mapshaper.org/) to convert and simplify geometries.
 5. **Save paths**  
    Place or name files consistently with the defaults used by the commands (for example under `migration/`), or pass explicit `--json-file` / `--full-json` / `--simplified-json` paths in steps 2 and 3.
 
----
-
-## 2) Worksheet creation and checking (`generate_electorate_boundary_worksheet`)
+## Worksheet creation and checking (`generate_electorate_boundary_worksheet`)
 
 ### Prerequisites
 
@@ -86,9 +84,7 @@ The CSV has:
 3. **Indices** — Must be unique and cover `0 … N-1` without duplicates (upload validates duplicates).
 4. **Alignment** — Order in the GeoJSON is arbitrary relative to names; use maps or external metadata to pair each index with the right electorate. `suggested_slug` is alphabetical-by-name order and **may not** match mapshaper order — treat it as a hint only.
 
----
-
-## 3) Uploading electorate boundaries (`upload_electorate_boundaries`)
+## Uploading electorate boundaries (`upload_electorate_boundaries`)
 
 ### Mapping source
 
