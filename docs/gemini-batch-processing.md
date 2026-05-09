@@ -1,8 +1,7 @@
 ---
 title: Gemini batch processing
+description: Design, setup, and workflow for batch processing with Gemini in WhereTheyStand.
 ---
-
-# Gemini batch processing
 
 ## Overview
 This app uses Google AI Studio batch jobs to process uploaded files with Gemini and store results in the database. Batch processing is used to reduce cost and is driven by management commands rather than REST endpoints.
