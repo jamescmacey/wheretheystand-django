@@ -1,6 +1,7 @@
 ---
 title: Gemini batch processing
-description: Design, setup, and workflow for batch processing with Gemini in WhereTheyStand.
+description: Design, setup, and workflow for batch processing with Gemini.
+aiAssistedGeneration: true
 ---
 
 ## Overview
@@ -59,3 +60,7 @@ To add a new processor:
 3. Register the processor in `PROCESSOR_REGISTRY`.
 
 The same submit/process management commands can then be used with the new processor name.
+
+::callout{icon="i-lucide-info" color="neutral"}
+This documentation file was generated largely by Cursor.
+::
