@@ -1,10 +1,26 @@
+import argparse
 import csv
 import json
 import os
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Q
+from django.utils.dateparse import parse_date
 
 from wts_app.models import Electorate
+
+
+def _parse_electorate_type_arg(value):
+    t = value.strip().lower()
+    if t == "all":
+        return None
+    if t == "general":
+        return "general"
+    if t in ("maori", "māori"):
+        return "maori"
+    raise argparse.ArgumentTypeError(
+        "must be one of: all, general, māori (maori accepted without macron)"
+    )
 
 
 class Command(BaseCommand):
@@ -20,9 +36,19 @@ class Command(BaseCommand):
             help="Path to GeometryCollection JSON.",
         )
         parser.add_argument(
-            "--electorates-csv",
-            default="migration/electorates.csv",
-            help="Path to electorates CSV fallback for suggested slugs when DB is unavailable.",
+            "--electorate-type",
+            type=_parse_electorate_type_arg,
+            required=True,
+            metavar="TYPE",
+            help='Which electorates to suggest: "all", "general", or "māori" (DB value maori).',
+        )
+        parser.add_argument(
+            "--date",
+            required=True,
+            help=(
+                "Reference date (YYYY-MM-DD). Includes electorates with valid_from on or "
+                "before this date that are not ended before this date (valid_to null or ≥ date)."
+            ),
         )
         parser.add_argument(
             "--output-csv",
@@ -37,28 +63,30 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         json_file = options["json_file"]
-        electorates_csv = options["electorates_csv"]
+        electorate_type = options["electorate_type"]
+        ref_date = parse_date(options["date"])
+        if ref_date is None:
+            raise CommandError(
+                f"Invalid --date {options['date']!r}. Use YYYY-MM-DD."
+            )
         output_csv = options["output_csv"]
         overwrite = options["overwrite"]
 
         if not os.path.exists(json_file):
             raise CommandError(f"JSON file does not exist: {json_file}")
-        if not os.path.exists(electorates_csv):
-            raise CommandError(f"Electorates CSV does not exist: {electorates_csv}")
         if os.path.exists(output_csv) and not overwrite:
             raise CommandError(
                 f"Output CSV already exists: {output_csv}. Use --overwrite to replace it."
             )
 
         geometry_count = self._load_geometry_count(json_file)
-        suggested_slugs = self._load_current_electorate_slugs_from_db()
+        suggested_slugs = self._load_electorate_slugs_from_db(electorate_type, ref_date)
         if not suggested_slugs:
-            self.stdout.write(
-                self.style.WARNING(
-                    "No current electorates found in DB, falling back to electorates CSV."
-                )
+            type_label = "all types" if electorate_type is None else electorate_type
+            raise CommandError(
+                f"No electorates with slugs found for type={type_label!r} "
+                f"valid on {ref_date.isoformat()}. Load or adjust data before generating the worksheet."
             )
-            suggested_slugs = self._load_general_electorate_slugs(electorates_csv)
 
         output_dir = os.path.dirname(output_csv)
         if output_dir:
@@ -93,7 +121,7 @@ class Command(BaseCommand):
             )
         )
         self.stdout.write(
-            "Fill in electorate_slug values, then run migrate_electorate_boundaries "
+            "Fill in electorate_slug values, then run upload_electorate_boundaries "
             f"with --mapping-csv {output_csv}"
         )
 
@@ -107,24 +135,11 @@ class Command(BaseCommand):
             raise CommandError(f"{json_file} has no geometries.")
         return len(geometries)
 
-    def _load_general_electorate_slugs(self, electorates_csv):
-        slugs = []
-        with open(electorates_csv, "r", encoding="utf-8-sig") as fh:
-            reader = csv.DictReader(fh)
-            for row in reader:
-                if (row.get("type") or "").strip().lower() != "general":
-                    continue
-                slug = (row.get("slug") or "").strip()
-                if slug:
-                    slugs.append(slug)
-        return slugs
-
-    def _load_current_electorate_slugs_from_db(self):
-        rows = (
-            Electorate.objects.filter(status="current", electorate_type="general")
-            .exclude(slug__isnull=True)
-            .exclude(slug="")
-            .order_by("name")
-            .values_list("slug", flat=True)
-        )
-        return list(rows)
+    def _load_electorate_slugs_from_db(self, electorate_type, ref_date):
+        qs = Electorate.objects.filter(
+            valid_from__lte=ref_date,
+        ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=ref_date))
+        if electorate_type is not None:
+            qs = qs.filter(electorate_type=electorate_type)
+        qs = qs.exclude(slug__isnull=True).exclude(slug="").order_by("name")
+        return list(qs.values_list("slug", flat=True))
