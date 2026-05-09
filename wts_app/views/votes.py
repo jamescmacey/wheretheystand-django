@@ -18,7 +18,7 @@ class PartySimpleSerializer(serializers.ModelSerializer):
     """Simple serializer for parties with minimal fields."""
     class Meta:
         model = Party
-        fields = ['id', 'display_name', 'short_name', 'abbreviation']
+        fields = ['id', 'display_name', 'short_name', 'abbreviation', 'colour', 'slug']
 
 
 class VoteRecordSerializer(serializers.ModelSerializer):

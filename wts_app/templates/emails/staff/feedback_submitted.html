@@ -1,0 +1,6 @@
+{% extends "emails/staff/base.html" %}
+{% block body %}
+<p>Dear {{ recipient_name }},</p>
+<p>A new {{ item_label }} has been submitted. It has been assigned the identifier <strong>{{ submission_id }}</strong> and can be accessed <a href="{{ admin_url }}" style="color:#349494;">here</a>.</p>
+<p>Regards</p>
+{% endblock %}

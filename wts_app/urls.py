@@ -55,6 +55,7 @@ from .views import (
     CreditCardReconciliationRetrieveUpdateDestroyView,
     ElectionDonationReturnListCreateView,
     ElectionDonationReturnRetrieveUpdateDestroyView,
+    FeedbackCreateView,
     PartyListCreateView,
     PartyRetrieveUpdateDestroyView,
     ParliamentListCreateView,
@@ -172,4 +173,7 @@ urlpatterns = [
     # CreditCardReconciliation endpoints
     path("credit-card-reconciliations/", CreditCardReconciliationListCreateView.as_view(), name="creditcardreconciliation-list-create"),
     path("credit-card-reconciliations/<uuid:pk>/", CreditCardReconciliationRetrieveUpdateDestroyView.as_view(), name="creditcardreconciliation-detail"),
+
+    # Feedback (public POST with Turnstile)
+    path("feedback/", FeedbackCreateView.as_view(), name="feedback-create"),
 ]
