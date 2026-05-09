@@ -161,6 +161,13 @@ class ParliamentaryAffiliation(BaseModel):
     class Meta:
         ordering = ['parliament__number', 'person__last_name']
 
+        indexes = [
+            models.Index(fields=['-elected_date'], name='parl_aff_elected_date_desc_idx'),
+            models.Index(fields=['-sworn_date'], name='parl_aff_sworn_date_desc_idx'),
+            models.Index(fields=['-end_date'], name='parl_aff_end_date_desc_idx'),
+            models.Index(fields=['person'], name='parl_aff_person_idx'),
+        ]
+
     def __str__(self):
         return f"{self.person.display_name} - {self.parliament.number} - {self.electorate.name if self.electorate else 'List'} - {self.start_reason if self.start_reason else ''} - {self.end_reason if self.end_reason else ''}"
 
@@ -174,6 +181,14 @@ class PartyAffiliation(BaseModel):
 
     def __str__(self):
         return self.person.display_name + " " + self.party.display_name
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['-start_date'], name='party_aff_start_date_desc_idx'),
+            models.Index(fields=['-end_date'], name='party_aff_end_date_desc_idx'),
+            models.Index(fields=['person'], name='party_aff_person_idx'),
+            models.Index(fields=['party'], name='party_aff_party_idx'),
+        ]
 
 class PartyLeader(BaseModel):
     person = models.ForeignKey(Person,on_delete=models.CASCADE)
