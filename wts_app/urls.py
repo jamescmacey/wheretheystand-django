@@ -56,6 +56,8 @@ from .views import (
     ElectionDonationReturnListCreateView,
     ElectionDonationReturnRetrieveUpdateDestroyView,
     FeedbackCreateView,
+    HomepageView,
+    RandomPageView,
     PartyListCreateView,
     PartyRetrieveUpdateDestroyView,
     ParliamentListCreateView,
@@ -176,4 +178,8 @@ urlpatterns = [
 
     # Feedback (public POST with Turnstile)
     path("feedback/", FeedbackCreateView.as_view(), name="feedback-create"),
+
+    # Client utilities
+    path("client/homepage/", HomepageView.as_view(), name="client-homepage"),
+    path("client/random/", RandomPageView.as_view(), name="client-random"),
 ]
