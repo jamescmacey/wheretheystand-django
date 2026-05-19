@@ -4,10 +4,11 @@ Vote views.
 Views for Vote and VoteRecord models.
 """
 
+from django.db.models import Q
 from rest_framework import generics, serializers
 from ..models import Vote, VoteRecord
 from .base import StandardResultsSetPagination
-from .bills import BillSimpleSerializer
+from .bills import BillSimpleSerializer, VALID_BILL_TYPES, _parse_bill_types
 from .people import PersonSimpleSerializer
 
 
@@ -31,13 +32,64 @@ class VoteRecordSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+VALID_VOTE_TYPE_CODES = {'voice', 'party', 'personal', 'split_party'}
+
+VOTE_LIST_ORDERING = {
+    '-date',
+    'date',
+    'bill__name',
+    '-bill__name',
+}
+
+
+def _parse_csv_list(request, param):
+    """Return a list from repeated or comma-separated query params."""
+    raw = request.query_params.getlist(param)
+    if raw:
+        return [t.strip() for part in raw for t in part.split(',') if t.strip()]
+    single = request.query_params.get(param)
+    if single:
+        return [t.strip() for t in single.split(',') if t.strip()]
+    return []
+
+
+def _apply_vote_type_filters(queryset, vote_types):
+    """Filter by UI vote-type checkboxes (party vs split party are distinct)."""
+    codes = [t for t in vote_types if t in VALID_VOTE_TYPE_CODES]
+    if not codes:
+        return queryset
+
+    q = Q()
+    if 'voice' in codes:
+        q |= Q(vote_type='voice')
+    if 'personal' in codes:
+        q |= Q(vote_type='personal')
+    if 'party' in codes:
+        q |= Q(vote_type='party', contains_split_party_votes=False)
+    if 'split_party' in codes:
+        q |= Q(contains_split_party_votes=True)
+    return queryset.filter(q)
+
+
 class VoteSimpleSerializer(serializers.ModelSerializer):
     """Simple serializer for votes with minimal fields."""
     bill = BillSimpleSerializer(read_only=True)
     
     class Meta:
         model = Vote
-        fields = ['id', 'bill', 'date', 'reading', 'ayes', 'noes', 'motion_agreed', 'vote_type']
+        fields = [
+            'id',
+            'bill',
+            'date',
+            'reading',
+            'ayes',
+            'noes',
+            'abstentions',
+            'absentees',
+            'motion_agreed',
+            'vote_type',
+            'contains_split_party_votes',
+        ]
 
 class VoteSimpleSerializerNoBill(serializers.ModelSerializer):
     """Simple serializer for votes with minimal fields."""
@@ -70,6 +122,14 @@ class VoteListCreateView(generics.ListCreateAPIView):
         bill_legacy_id = self.request.query_params.get('bill_legacy_id', None)
         if bill_legacy_id:
             queryset = queryset.filter(bill__legacy_id=bill_legacy_id)
+
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            queryset = queryset.filter(bill__name__icontains=search)
+
+        bill_types = [t for t in _parse_bill_types(self.request) if t in VALID_BILL_TYPES]
+        if bill_types:
+            queryset = queryset.filter(bill__bill_type__in=bill_types)
         
         reading = self.request.query_params.get('reading', None)
         if reading:
@@ -78,10 +138,14 @@ class VoteListCreateView(generics.ListCreateAPIView):
                 queryset = queryset.filter(reading=reading_int)
             except (ValueError, TypeError):
                 pass
-        
-        vote_type = self.request.query_params.get('vote_type', None)
-        if vote_type:
-            queryset = queryset.filter(vote_type=vote_type)
+
+        vote_types = _parse_csv_list(self.request, 'vote_types')
+        if vote_types:
+            queryset = _apply_vote_type_filters(queryset, vote_types)
+        else:
+            vote_type = self.request.query_params.get('vote_type', None)
+            if vote_type:
+                queryset = queryset.filter(vote_type=vote_type)
         
         date_from = self.request.query_params.get('date_from', None)
         if date_from:
@@ -103,13 +167,17 @@ class VoteListCreateView(generics.ListCreateAPIView):
 
         person_slug = self.request.query_params.get('person_slug', None)
         if person_slug:
-            queryset = queryset.filter(vote_records__person__slug=person_slug)
+            queryset = queryset.filter(vote_records__person__slug=person_slug).distinct()
+
+        ordering = self.request.query_params.get('ordering', '-date')
+        if ordering in VOTE_LIST_ORDERING:
+            queryset = queryset.order_by(ordering)
         
         return queryset
     
     def get_serializer_class(self):
         if self.request and self.request.method == "GET":
-            return VoteSerializer
+            return VoteSimpleSerializer
         return VoteSerializer
     
     pagination_class = StandardResultsSetPagination
