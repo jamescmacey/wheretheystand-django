@@ -4,6 +4,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+from .celery import app as celery_app
+
 # Initialize OpenTelemetry exporter before DjangoInstrumentor
 # This ensures the TracerProvider is set up before DjangoInstrumentor instruments Django
 try:
@@ -19,3 +21,5 @@ oauth.register(
     server_metadata_url=os.getenv('OIDC_CONFIGURATION'),
     client_kwargs={'scope': 'openid email'},
 )
+
+__all__ = ("celery_app",)

@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     'colorfield',
     'drf_spectacular',
     'drf_spectacular_sidecar',
+    'django_celery_beat',
+    'django_celery_results',
 ]
 
 MIDDLEWARE = [
@@ -191,6 +193,20 @@ BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; W
 # Gemini settings
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+
+# Celery settings
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = os.getenv("REDIS_PORT")
+REDIS_USER = os.getenv("REDIS_USER")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+if not REDIS_HOST or not REDIS_PORT or not REDIS_USER or not REDIS_PASSWORD:
+    raise ValueError("REDIS_HOST, REDIS_PORT, REDIS_USER, and REDIS_PASSWORD are not set")
+
+CELERY_BROKER_URL = f"redis://{REDIS_USER}:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0"
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "1800"))
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 STATIC_URL = f'https://{os.getenv("API_STATIC_CUSTOM_DOMAIN")}/'
 
