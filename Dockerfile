@@ -20,8 +20,10 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy the project
 COPY . /app/
 
-# Expose port 8000 to the outside world
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+# Expose port 8000 for the web role only (worker/beat do not listen on HTTP)
 EXPOSE 8000
 
-# Command to run the WSGI server
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "wts.wsgi:application"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
