@@ -20,13 +20,13 @@ from .credit_card_expenses import *  # CreditCardReconciliation, CreditCardExpen
 from .gemini import *  # Gemini batch processing
 from .election_donation_returns import *  # ElectionDonationReturn
 from .feedback import *  # Feedback
+from .user import *  # User
 
 # from .analytics import *  # Analytics/tracking models
 # from .relationships import *  # Many-to-many, foreign key relationships
 
 # Make all models available at the package level
 __all__ = [
-    # Add model names here as you create them
-    # Example: 'User', 'Post', 'Comment', etc.
+    'User',
 ]
 
