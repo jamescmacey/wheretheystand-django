@@ -2,11 +2,14 @@
 
 from django.db import migrations, models
 
+from ._user_model import create_user_model
+
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('wts_app', '0039_parliamentaryaffiliation_elected_date_desc_idx_and_more'),
+        ("auth", "0012_alter_user_first_name_max_length"),
+        ("wts_app", "0039_parliamentaryaffiliation_elected_date_desc_idx_and_more"),
     ]
 
     operations = [
@@ -44,5 +47,12 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='partyaffiliation',
             index=models.Index(fields=['party'], name='party_aff_party_idx'),
+        ),
+        # Register the custom user model in migration state only. The table is
+        # created in 0041_user so admin.LogEntry can resolve AUTH_USER_MODEL
+        # before that migration runs on databases that already had contrib.auth.
+        migrations.SeparateDatabaseAndState(
+            state_operations=[create_user_model()],
+            database_operations=[],
         ),
     ]

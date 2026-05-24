@@ -32,6 +32,7 @@ class GazetteNotice(BaseModel):
     def save(self, *args, **kwargs):
         # Only download if file doesn't exist and we have a number
         if not self.file and self.number:
+            # Fetch the notice from the Gazette website
             try:
                 # Construct the PDF URL - try common patterns
                 base_url = f"https://gazette.govt.nz/notice/id/{self.number}"

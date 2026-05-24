@@ -24,4 +24,5 @@ from .credit_card_expenses import *  # Credit card expenses views
 from .timeline import *  # Timeline views
 from .election_donation_returns import *  # Election donation returns views
 from .feedback import *  # Feedback submission
+from .users import *  # Public user profile
 from .client import *  # Client utilities (random page, etc.)
