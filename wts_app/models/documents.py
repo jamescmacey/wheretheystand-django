@@ -41,10 +41,10 @@ def upload_to(instance, filename):
             # Clean up the temporary attribute
             delattr(instance, '_file_content_for_hash')
         elif instance.file and hasattr(instance.file, 'file') and instance.file.file:
-            # For existing files, read from the file
-            instance.file.open()
+            if instance.file.closed:
+                instance.file.open()
             file_hash = hash_file(instance.file)[-5:]
-            instance.file.close()
+            instance.file.seek(0)
         else:
             # Fallback: use a simple hash based on timestamp and filename
             file_hash = hashlib.md5(f"{timezone.now().timestamp()}{filename}".encode()).hexdigest()[-5:]

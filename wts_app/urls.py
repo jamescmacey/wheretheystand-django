@@ -63,6 +63,10 @@ from .views import (
     PartyRetrieveUpdateDestroyView,
     ParliamentListCreateView,
     ParliamentRetrieveUpdateDestroyView,
+    WorkbookListCreateView,
+    WorkbookRetrieveUpdateDestroyView,
+    WorkbookFileListCreateView,
+    WorkbookFileDestroyView,
 )
 
 from django.templatetags.static import static
@@ -186,4 +190,14 @@ urlpatterns = [
     # Client utilities
     path("client/homepage/", HomepageView.as_view(), name="client-homepage"),
     path("client/random/", RandomPageView.as_view(), name="client-random"),
+
+    # Workbook endpoints
+    path("workbooks/", WorkbookListCreateView.as_view(), name="workbook-list-create"),
+    path("workbooks/<uuid:pk>/", WorkbookRetrieveUpdateDestroyView.as_view(), name="workbook-detail"),
+    path("workbooks/<uuid:pk>/files/", WorkbookFileListCreateView.as_view(), name="workbook-file-list-create"),
+    path(
+        "workbooks/<uuid:pk>/files/<uuid:file_pk>/",
+        WorkbookFileDestroyView.as_view(),
+        name="workbook-file-detail",
+    ),
 ]
