@@ -159,6 +159,9 @@ DATABASES = {
     }
 }
 
+from google.oauth2 import service_account
+import json
+
 # Storage
 STORAGES = {
     "default": {
@@ -196,10 +199,17 @@ STORAGES = {
             "custom_domain": os.getenv("API_STATIC_CUSTOM_DOMAIN"),
         },
     },
+    "private_files": {
+        "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+        "OPTIONS": {
+          "bucket_name": os.getenv("GCP_PRIVATE_FILES_BUCKET_NAME"),
+          "credentials": service_account.Credentials.from_service_account_info(json.loads(os.getenv("GCP_PRIVATE_FILES_CREDENTIALS"))),
+          "gzip": True,
+        },
+      },
 }
 
 # Firebase settings
-import json
 FIREBASE_CONFIG = os.getenv("FIREBASE_CONFIG")
 if FIREBASE_CONFIG:
     FIREBASE_CONFIG = json.loads(FIREBASE_CONFIG)

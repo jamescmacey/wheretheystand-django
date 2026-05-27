@@ -21,9 +21,7 @@ from .gemini import *  # Gemini batch processing
 from .election_donation_returns import *  # ElectionDonationReturn
 from .feedback import *  # Feedback
 from .user import *  # User
-
-# from .analytics import *  # Analytics/tracking models
-# from .relationships import *  # Many-to-many, foreign key relationships
+from .workbooks import *  # Workbook
 
 # Make all models available at the package level
 __all__ = [

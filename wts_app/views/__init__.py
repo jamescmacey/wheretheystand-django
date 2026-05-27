@@ -26,3 +26,4 @@ from .election_donation_returns import *  # Election donation returns views
 from .feedback import *  # Feedback submission
 from .users import *  # Public user profile
 from .client import *  # Client utilities (random page, etc.)
+from .workbooks import *  # Workbook views
