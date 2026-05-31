@@ -30,6 +30,7 @@ class Person(BaseModel):
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
     cached_description = models.TextField(blank=True, null=True)
     cached_colour = ColorField(blank=True, null=True)
+    parliament_api_id = models.CharField(max_length=36, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if not self.id or not self.slug:
