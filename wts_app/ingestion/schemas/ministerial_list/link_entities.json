@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "workbook_file_id": { "type": "string", "format": "uuid" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "extracted_name": { "type": "string" },
+          "person_id": { "type": ["string", "null"] },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "raw": { "type": "string" },
+                "title": { "type": ["string", "null"] },
+                "conjunction": { "type": ["string", "null"] },
+                "portfolio_name": { "type": ["string", "null"] },
+                "portfolio_id": { "type": ["string", "null"] },
+                "category": { "type": "string", "enum": ["p", "r"] },
+                "specialisation": { "type": ["string", "null"] }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": ["positions"],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": ["entries", "workbook_file_id"],
+  "additionalProperties": true
+}

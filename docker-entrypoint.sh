@@ -8,11 +8,14 @@ case "${APP_ROLE:-web}" in
   worker)
     exec celery -A wts worker -l info
     ;;
+  hansard-worker)
+    exec celery -A wts worker -Q hansard -l info
+    ;;
   beat)
     exec celery -A wts beat -l info
     ;;
   *)
-    echo "Unknown APP_ROLE: ${APP_ROLE} (expected web, worker, or beat)" >&2
+    echo "Unknown APP_ROLE: ${APP_ROLE} (expected web, worker, hansard-worker, or beat)" >&2
     exit 1
     ;;
 esac

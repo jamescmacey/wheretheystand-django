@@ -19,6 +19,7 @@ class GeminiBatchJob(BaseModel):
         RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
         PARTIAL = "partial", "Partially succeeded"
+        PROCESSED = "processed", "Processed"
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
         CANCELLING = "cancelling", "Cancelling"

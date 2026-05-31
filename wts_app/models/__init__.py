@@ -21,7 +21,10 @@ from .gemini import *  # Gemini batch processing
 from .election_donation_returns import *  # ElectionDonationReturn
 from .feedback import *  # Feedback
 from .user import *  # User
-from .workbooks import *  # Workbook
+from .workbooks import *  # Workbook, WorkbookFile
+from .workbook_pipeline import *  # WorkbookStep
+from .system_events import *  # MonitoredSource, SystemEvent
+from .hansard import *  # HansardSearchResult, HansardDaily, HansardDebate, HansardItem, HansardBillAssocation
 
 # Make all models available at the package level
 __all__ = [

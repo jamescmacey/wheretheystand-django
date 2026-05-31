@@ -67,6 +67,20 @@ from .views import (
     WorkbookRetrieveUpdateDestroyView,
     WorkbookFileListCreateView,
     WorkbookFileDestroyView,
+    WorkbookStepListView,
+    WorkbookStepDetailView,
+    WorkbookStepActionView,
+    WorkbookEnsureStepsView,
+    WorkbookApplyBatchDefaultsView,
+    WorkbookFileDownloadView,
+    ConsolePersonPickerListView,
+    ConsoleLicencePickerListView,
+    ConsoleCopyrightPartyPickerListView,
+    ConsoleMinisterialPortfolioPickerListView,
+    MonitoredSourceListView,
+    SystemEventListView,
+    SystemEventDetailView,
+    SystemEventRetryView,
 )
 
 from django.templatetags.static import static
@@ -199,5 +213,76 @@ urlpatterns = [
         "workbooks/<uuid:pk>/files/<uuid:file_pk>/",
         WorkbookFileDestroyView.as_view(),
         name="workbook-file-detail",
+    ),
+    path(
+        "workbooks/<uuid:pk>/files/<uuid:file_pk>/download/",
+        WorkbookFileDownloadView.as_view(),
+        name="workbook-file-download",
+    ),
+    path(
+        "workbooks/<uuid:pk>/ensure-steps/",
+        WorkbookEnsureStepsView.as_view(),
+        name="workbook-ensure-steps",
+    ),
+    path(
+        "workbooks/<uuid:pk>/apply-batch-defaults/",
+        WorkbookApplyBatchDefaultsView.as_view(),
+        name="workbook-apply-batch-defaults",
+    ),
+    path(
+        "console/people/",
+        ConsolePersonPickerListView.as_view(),
+        name="console-person-picker",
+    ),
+    path(
+        "console/licences/",
+        ConsoleLicencePickerListView.as_view(),
+        name="console-licence-picker",
+    ),
+    path(
+        "console/copyright-parties/",
+        ConsoleCopyrightPartyPickerListView.as_view(),
+        name="console-copyright-party-picker",
+    ),
+    path(
+        "console/ministerial-portfolios/",
+        ConsoleMinisterialPortfolioPickerListView.as_view(),
+        name="console-ministerial-portfolio-picker",
+    ),
+    path(
+        "workbooks/<uuid:pk>/steps/",
+        WorkbookStepListView.as_view(),
+        name="workbook-step-list",
+    ),
+    path(
+        "workbooks/<uuid:pk>/steps/<str:step_key>/",
+        WorkbookStepDetailView.as_view(),
+        name="workbook-step-detail",
+    ),
+    path(
+        "workbooks/<uuid:pk>/steps/<str:step_key>/start/",
+        WorkbookStepActionView.as_view(),
+        {"action": "start"},
+        name="workbook-step-start",
+    ),
+    path(
+        "workbooks/<uuid:pk>/steps/<str:step_key>/commit/",
+        WorkbookStepActionView.as_view(),
+        {"action": "commit"},
+        name="workbook-step-commit",
+    ),
+    path(
+        "workbooks/<uuid:pk>/steps/<str:step_key>/reject/",
+        WorkbookStepActionView.as_view(),
+        {"action": "reject"},
+        name="workbook-step-reject",
+    ),
+    path("monitored-sources/", MonitoredSourceListView.as_view(), name="monitored-source-list"),
+    path("system-events/", SystemEventListView.as_view(), name="system-event-list"),
+    path("system-events/<uuid:pk>/", SystemEventDetailView.as_view(), name="system-event-detail"),
+    path(
+        "system-events/<uuid:pk>/retry/",
+        SystemEventRetryView.as_view(),
+        name="system-event-retry",
     ),
 ]
