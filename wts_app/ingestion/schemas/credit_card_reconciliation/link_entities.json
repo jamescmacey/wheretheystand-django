@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "person_id": { "type": "string", "format": "uuid" },
+    "start_date": { "type": "string", "format": "date" },
+    "end_date": { "type": "string", "format": "date" },
+    "workbook_file_id": { "type": "string", "format": "uuid" }
+  },
+  "required": ["person_id", "start_date", "end_date", "workbook_file_id"],
+  "additionalProperties": true
+}

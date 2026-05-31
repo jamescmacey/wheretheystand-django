@@ -4,7 +4,9 @@ Django settings for wts project.
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
+from kombu import Queue
 
 load_dotenv()
 
@@ -162,6 +164,9 @@ DATABASES = {
 from google.oauth2 import service_account
 import json
 
+GCP_PRIVATE_FILES_CREDENTIALS = json.loads(os.getenv("GCP_PRIVATE_FILES_CREDENTIALS"))
+GCP_PRIVATE_FILES_BUCKET_NAME = os.getenv("GCP_PRIVATE_FILES_BUCKET_NAME")
+
 # Storage
 STORAGES = {
     "default": {
@@ -202,8 +207,8 @@ STORAGES = {
     "private_files": {
         "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
         "OPTIONS": {
-          "bucket_name": os.getenv("GCP_PRIVATE_FILES_BUCKET_NAME"),
-          "credentials": service_account.Credentials.from_service_account_info(json.loads(os.getenv("GCP_PRIVATE_FILES_CREDENTIALS"))),
+          "bucket_name": GCP_PRIVATE_FILES_BUCKET_NAME,
+          "credentials": service_account.Credentials.from_service_account_info(GCP_PRIVATE_FILES_CREDENTIALS),
           "gzip": True,
         },
       },
@@ -236,6 +241,14 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "1800"))
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_TASK_QUEUES = (
+    Queue("celery"),
+    Queue("hansard"),
+)
+CELERY_TASK_ROUTES = {
+    "wts_app.hansard.get_results": {"queue": "hansard"},
+    "wts_app.hansard.get_daily": {"queue": "hansard"},
+}
 
 STATIC_URL = f'https://{os.getenv("API_STATIC_CUSTOM_DOMAIN")}/'
 

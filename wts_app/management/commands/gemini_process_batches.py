@@ -67,6 +67,7 @@ class Command(BaseCommand):
                 GeminiBatchJob.Status.FAILED,
                 GeminiBatchJob.Status.CANCELLED,
                 GeminiBatchJob.Status.EXPIRED,
+                GeminiBatchJob.Status.PROCESSED,
             ]
         )
         if limit:
@@ -95,9 +96,24 @@ class Command(BaseCommand):
             try:
                 batch_job = client.get_batch_job(name=job.batch_name)
             except Exception as exc:  # pylint: disable=broad-except
-                job.error_message = str(exc)
+                exc_str = str(exc)
+                exc_upper = exc_str.upper()
+
+                # If the Gemini batch job is missing (404), treat it as terminal so
+                # Beat doesn't repeatedly retry the same job forever.
+                is_not_found = ("404" in exc_upper) or ("NOT_FOUND" in exc_upper)
+
+                job.error_message = exc_str
                 job.last_checked_at = timezone.now()
-                job.save(update_fields=["error_message", "last_checked_at", "updated_at"])
+                update_fields = ["error_message", "last_checked_at", "updated_at"]
+
+                if is_not_found:
+                    job.status = GeminiBatchJob.Status.FAILED
+                    if not job.completed_at:
+                        job.completed_at = timezone.now()
+                    update_fields.extend(["status", "completed_at"])
+
+                job.save(update_fields=update_fields)
                 self.stdout.write(
                     self.style.ERROR(f"Failed to fetch batch job {job.id}: {exc}")
                 )
@@ -164,7 +180,12 @@ class Command(BaseCommand):
                     ).order_by("output_index")
                 )
             if not items:
-                self.stdout.write(self.style.WARNING(f"Job {job.id} has no pending items."))
+                # Terminal: Gemini job is complete and all items are already in a
+                # terminal state (processed/failed/skipped). Mark so we don't poll again.
+                job.status = GeminiBatchJob.Status.PROCESSED
+                if not job.completed_at:
+                    job.completed_at = timezone.now()
+                job.save(update_fields=["status", "completed_at", "updated_at"])
                 continue
 
             if len(responses) != len(items):
@@ -211,6 +232,11 @@ class Command(BaseCommand):
                     f"Processed {processed} responses for job {job.id}."
                 )
             )
+
+            job.status = GeminiBatchJob.Status.PROCESSED
+            if not job.completed_at:
+                job.completed_at = timezone.now()
+            job.save(update_fields=["status", "completed_at", "updated_at"])
 
     def _get_responses(self, batch_job, client: GeminiClient):
         if batch_job.dest and batch_job.dest.inlined_responses is not None:

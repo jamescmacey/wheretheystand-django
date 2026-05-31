@@ -6,10 +6,12 @@ User-scoped CRUD for workbooks used to group files ready for ingestion.
 
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, serializers
+from rest_framework import generics, serializers, status
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAdminUser
 
+from ..ingestion.orchestrator import ensure_steps_for_new_file
 from ..models import Workbook, WorkbookFile
 from .base import StandardResultsSetPagination
 from django.conf import settings
@@ -46,8 +48,20 @@ class WorkbookSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Workbook
-        fields = ("id", "user", "name", "created_at", "updated_at", "files")
-        read_only_fields = ("id", "created_at", "updated_at")
+        fields = (
+            "id",
+            "user",
+            "name",
+            "recipe_key",
+            "source",
+            "status",
+            "current_step_key",
+            "batch_defaults",
+            "created_at",
+            "updated_at",
+            "files",
+        )
+        read_only_fields = ("id", "created_at", "updated_at", "source", "status")
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -111,10 +125,14 @@ class WorkbookListCreateView(WorkbookAccessMixin, generics.ListCreateAPIView):
         return qs.order_by(ordering)
 
     def perform_create(self, serializer):
+        from ..ingestion.orchestrator import ensure_steps
+
         if "user" in serializer.validated_data:
-            serializer.save()
+            workbook = serializer.save()
         else:
-            serializer.save(user=self.request.user)
+            workbook = serializer.save(user=self.request.user)
+        if workbook.recipe_key and workbook.files.exists():
+            ensure_steps(workbook)
 
 
 class WorkbookRetrieveUpdateDestroyView(WorkbookAccessMixin, generics.RetrieveUpdateDestroyAPIView):
@@ -127,6 +145,11 @@ class WorkbookRetrieveUpdateDestroyView(WorkbookAccessMixin, generics.RetrieveUp
 
     def get_queryset(self):
         return self.get_workbook_queryset()
+
+    def perform_destroy(self, instance):
+        for workbook_file in list(instance.files.all()):
+            workbook_file.delete()
+        instance.delete()
 
 
 class WorkbookFileListCreateView(WorkbookAccessMixin, generics.ListCreateAPIView):
@@ -143,7 +166,12 @@ class WorkbookFileListCreateView(WorkbookAccessMixin, generics.ListCreateAPIView
         return WorkbookFile.objects.filter(workbook=self.get_workbook()).order_by("-created_at")
 
     def perform_create(self, serializer):
-        serializer.save(workbook=self.get_workbook())
+        workbook = self.get_workbook()
+        if workbook.status == Workbook.Status.CLOSED:
+            raise DRFValidationError({"detail": "Workbook is closed."})
+        workbook_file = serializer.save(workbook=workbook)
+        if workbook.recipe_key:
+            ensure_steps_for_new_file(workbook, workbook_file)
 
 
 class WorkbookFileDestroyView(WorkbookAccessMixin, generics.DestroyAPIView):
@@ -157,7 +185,10 @@ class WorkbookFileDestroyView(WorkbookAccessMixin, generics.DestroyAPIView):
         return get_object_or_404(self.get_workbook_queryset(), pk=self.kwargs["pk"])
 
     def get_object(self):
+        workbook = self.get_workbook()
+        if workbook.status == Workbook.Status.CLOSED:
+            raise DRFValidationError({"detail": "Workbook is closed."})
         return get_object_or_404(
-            WorkbookFile.objects.filter(workbook=self.get_workbook()),
+            WorkbookFile.objects.filter(workbook=workbook),
             pk=self.kwargs["file_pk"],
         )

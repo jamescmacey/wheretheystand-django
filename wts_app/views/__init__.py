@@ -27,3 +27,6 @@ from .feedback import *  # Feedback submission
 from .users import *  # Public user profile
 from .client import *  # Client utilities (random page, etc.)
 from .workbooks import *  # Workbook views
+from .workbook_steps import *  # Workbook pipeline steps
+from .system_events import *  # Monitored sources and system events
+from .console_ingestion import *  # Console picker reference data

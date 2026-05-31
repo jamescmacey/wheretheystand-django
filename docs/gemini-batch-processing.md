@@ -47,6 +47,8 @@ This command:
 - Downloads the output file or uses inlined responses when available.
 - Parses each response and persists output rows to the database.
 
+When Celery beat is running, the app also periodically runs the polling step by calling the task `wts_app.gemini.process_completed_gemini_batches`, which wraps `gemini_process_batches`.
+
 ## Response format for credit card reconciliations
 The processor requests a JSON response that matches a strict schema. Each response should include the `request_id` and an `expenses` array with per-transaction details. Example:
 `{"request_id":"<uuid>","expenses":[{"date":"2025-01-15","merchant_name":"Example Store","description":"Optional description","amount_nzd":12.34,"original_currency_code":"NZD","original_amount":12.34}]}`

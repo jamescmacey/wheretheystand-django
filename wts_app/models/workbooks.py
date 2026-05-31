@@ -59,8 +59,40 @@ def select_storage():
     return storages["private_files"]
 
 class Workbook(BaseModel):
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        SYSTEM_EVENT = "system_event", "System event"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        CLOSED = "closed", "Closed"
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="workbooks", null=True, blank=True)
     name = models.CharField(max_length=255)
+    recipe_key = models.CharField(max_length=64, blank=True, null=True)
+    source = models.CharField(
+        max_length=32,
+        choices=Source.choices,
+        default=Source.MANUAL,
+    )
+    current_step_key = models.CharField(max_length=64, blank=True, null=True)
+    system_event = models.ForeignKey(
+        "SystemEvent",
+        on_delete=models.SET_NULL,
+        related_name="workbooks",
+        null=True,
+        blank=True,
+    )
+    batch_defaults = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Shared ingestion values (dates, copyright) applied across files in batch workbooks.",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.OPEN,
+    )
 
 class WorkbookFile(BaseModel):
     workbook = models.ForeignKey(Workbook, on_delete=models.CASCADE, related_name="files")
