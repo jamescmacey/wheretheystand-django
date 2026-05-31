@@ -25,6 +25,7 @@ from .workbooks import *  # Workbook, WorkbookFile
 from .workbook_pipeline import *  # WorkbookStep
 from .system_events import *  # MonitoredSource, SystemEvent
 from .hansard import *  # HansardSearchResult, HansardDaily, HansardDebate, HansardItem, HansardBillAssocation
+from .auto_updates import *  # AutoUpdate
 
 # Make all models available at the package level
 __all__ = [

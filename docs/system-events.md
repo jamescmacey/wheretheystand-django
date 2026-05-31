@@ -1,6 +1,7 @@
 ---
 title: System events
 description: Automated workbook creation from monitored sources.
+aiAssistedGeneration: true
 ---
 
 ## Models
