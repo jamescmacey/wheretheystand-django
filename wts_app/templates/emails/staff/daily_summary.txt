@@ -1,0 +1,13 @@
+Dear {{ recipient_name }},
+
+Here is a summary of the auto updates that have occurred in the last day:
+
+Total number of auto updates: {{ summary.total }}
+
+Number of auto updates that were successful, broken down by model:
+- Bills: {{ summary.successful.bills }}
+
+Number of auto updates that failed, broken down by model:
+- Bills: {{ summary.failed.bills }}
+
+Regards

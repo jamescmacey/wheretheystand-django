@@ -1,0 +1,15 @@
+{% extends "emails/staff/base.html" %}
+{% block body %}
+<p>Dear {{ recipient_name }},</p>
+<p>Here is a summary of the auto updates that have occurred in the last day:</p>
+<p>Total number of auto updates: {{ summary.total }}</p>
+<p>Number of auto updates that were successful, broken down by model:</p>
+<ul>
+    <li>Bills: {{ summary.successful.bills }}</li>
+</ul>
+<p>Number of auto updates that failed, broken down by model:</p>
+<ul>
+    <li>Bills: {{ summary.failed.bills }}</li>
+</ul>
+<p>Regards</p>
+{% endblock %}

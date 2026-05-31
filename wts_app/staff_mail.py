@@ -85,3 +85,35 @@ def send_feedback_submitted_staff_mail(feedback: Feedback, request) -> None:
                 to_email,
                 submission_id,
             )
+
+def send_daily_email_summary(summary: dict) -> None:
+    """Notify all active staff (with email) that a new Feedback row exists."""
+
+    recipients = list(_staff_recipient_names())
+    if not recipients:
+        logger.info("No staff recipients with email; skipping notification")
+        return
+
+    subject = f"WhereTheyStand daily summary"
+
+    for to_email, recipient_name in recipients:
+        context = {
+            "recipient_name": recipient_name,
+            "summary": summary,
+        }
+        text_body = render_to_string("emails/staff/daily_summary.txt", context)
+        html_body = render_to_string("emails/staff/daily_summary.html", context)
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=text_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[to_email],
+        )
+        msg.attach_alternative(html_body, "text/html")
+        try:
+            msg.send()
+        except Exception:
+            logger.exception(
+                "Failed to send daily summary to %s",
+                to_email
+            )
