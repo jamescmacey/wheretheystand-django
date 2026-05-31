@@ -6,9 +6,10 @@ case "${APP_ROLE:-web}" in
     exec gunicorn --bind 0.0.0.0:8000 wts.wsgi:application
     ;;
   worker)
-    exec celery -A wts worker -l info
+    exec celery -A wts worker -Q celery -l info
     ;;
   hansard-worker)
+    python -m playwright install chromium
     exec celery -A wts worker -Q hansard -l info
     ;;
   beat)

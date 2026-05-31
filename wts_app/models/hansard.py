@@ -3,6 +3,7 @@ from django.core.files.storage import storages
 from django.core.validators import MinValueValidator
 from .base import BaseModel
 from .bills import Bill
+from .people import Person
 
 
 class HansardSearchResult(BaseModel):
@@ -27,33 +28,6 @@ class HansardSearchResult(BaseModel):
         ("__other__", "__other__"),
     ]
 
-    """
-    Here is an example of the data we are looking to store:
-    {
-      "id": "6166f255-af82-4e57-b311-cb76920246bf",
-      "title": "Vote: Bills \u2014 Regulatory Standards Bill",
-      "subtitle": "Part 3  ",
-      "volumeNumber": 788,
-      "sittingDate": "2025-11-11T00:00:00Z",
-      "documentType": "DebateItem",
-      "documentSubtype": "Vote",
-      "progress": "Draft",
-      "memberId": "00000000-0000-0000-0000-000000000000",
-      "memberName": null,
-      "sortIndex": 813,
-      "portfolio": null,
-      "parliamentNumber": 54,
-      "types": [],
-      "subtypes": [],
-      "dateFrom": null,
-      "dateTo": null,
-      "members": [],
-      "portfolios": [],
-      "parentId": "9dc2acf8-9bed-4108-b610-a2dd2194f919",
-      "orderByFields": []
-    }
-    """
-
     result_id = models.CharField(max_length=36, unique=True)
     result_title = models.TextField(blank=True, null=True)
     result_subtitle = models.TextField(blank=True, null=True)
@@ -69,6 +43,8 @@ class HansardSearchResult(BaseModel):
     result_parliament_number = models.IntegerField(blank=True, null=True, validators=[MinValueValidator(1)])
     result_parent_result_id = models.CharField(max_length=36, blank=True, null=True)
 
+    matched_person = models.ForeignKey(Person, on_delete=models.SET_NULL, related_name='hansard_search_results', null=True, blank=True)
+
     retrieved_at = models.DateTimeField(blank=True, null=True)
 
     def __str__(self):
@@ -77,7 +53,7 @@ class HansardSearchResult(BaseModel):
 class HansardDaily(BaseModel):
 
     DAILY_PROGRESS_TYPES = [
-        ("Draft", "Complete"),
+        ("Draft", "Draft"),
         ("Corrected", "Corrected"),
         ("Final", "Final"),
         ("__other__", "__other__"),
@@ -86,11 +62,16 @@ class HansardDaily(BaseModel):
     def _select_storage():
         return storages['private_files']
 
+
     def _upload_to(instance, filename):
         return f"hansard/transcripts/{instance.sitting_date}.html"
 
+    def _upload_to_style(instance, filename):
+        return f"hansard/transcripts/{instance.sitting_date}.css"
+
     sitting_date = models.DateField(unique=True)
     transcript_file = models.FileField(upload_to=_upload_to, storage=_select_storage)
+    style_file = models.FileField(upload_to=_upload_to_style, storage=_select_storage)
     retrieved_at = models.DateTimeField(blank=True, null=True)
 
     daily_content = models.TextField(blank=True, null=True)
@@ -101,6 +82,9 @@ class HansardDaily(BaseModel):
     daily_title = models.TextField(blank=True, null=True)
     daily_subtitle = models.TextField(blank=True, null=True)
 
+    def __str__(self):
+        return f"{self.daily_title} - {self.daily_subtitle}"
+
 class HansardDebate(BaseModel):
     daily = models.ForeignKey(HansardDaily, on_delete=models.CASCADE, related_name='debates')
     debate_id = models.CharField(max_length=36, blank=True, null=True)
@@ -108,12 +92,18 @@ class HansardDebate(BaseModel):
     debate_content = models.TextField(blank=True, null=True)
     debate_subtitle = models.TextField(blank=True, null=True)
 
+    def __str__(self):
+        return f"{self.debate_title} - {self.debate_subtitle}"
+
 class HansardBillAssocation(BaseModel):
     debate = models.ForeignKey(HansardDebate, on_delete=models.CASCADE, related_name='bill_associations')
     assocation_id = models.CharField(max_length=36, blank=True, null=True)
     bill_title = models.TextField(blank=True, null=True)
     bill_id = models.CharField(max_length=36, blank=True, null=True)
     matched_bill = models.ForeignKey(Bill, on_delete=models.SET_NULL, related_name='hansard_bill_associations', null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.debate} - {self.bill_title}"
 
 class HansardItem(BaseModel):
     debate = models.ForeignKey(HansardDebate, on_delete=models.CASCADE, related_name='items')
@@ -134,4 +124,9 @@ class HansardItem(BaseModel):
     item_title = models.TextField(blank=True, null=True)
     item_content = models.TextField(blank=True, null=True)
     item_subtitle = models.TextField(blank=True, null=True)
+
+    matched_person = models.ForeignKey(Person, on_delete=models.SET_NULL, related_name='hansard_items', null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.debate} - {self.item_title}"
 

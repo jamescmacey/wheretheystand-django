@@ -15,6 +15,7 @@ class Vote(BaseModel):
     """
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
     parliament_document_id = models.TextField(blank=True,null=True)
+    hansard_api_id = models.CharField(max_length=36, blank=True, null=True)
     retrieved_at = models.DateTimeField(blank=True, null=True)
 
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name='votes')
