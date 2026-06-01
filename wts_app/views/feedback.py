@@ -1,9 +1,14 @@
+import logging
+
+from django.urls import reverse
 from rest_framework import generics, serializers
 from rest_framework.permissions import AllowAny
 
 from ..models import Feedback
-from ..staff_mail import send_feedback_submitted_staff_mail
+from ..tasks.feedback import notify_staff_feedback_submitted
 from ..turnstile import verify_turnstile_token
+
+logger = logging.getLogger(__name__)
 
 
 def _client_ip(request):
@@ -46,4 +51,12 @@ class FeedbackCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         instance = serializer.save()
-        send_feedback_submitted_staff_mail(instance, self.request)
+        path = reverse("admin:wts_app_feedback_change", args=[str(instance.pk)])
+        admin_url = self.request.build_absolute_uri(path)
+        try:
+            notify_staff_feedback_submitted.delay(str(instance.pk), admin_url)
+        except Exception:
+            logger.exception(
+                "Failed to queue staff notification for feedback %s",
+                instance.pk,
+            )
