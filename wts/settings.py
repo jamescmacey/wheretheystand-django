@@ -115,14 +115,18 @@ REST_FRAMEWORK = {
 if DEBUG:
     REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'].append('rest_framework.renderers.BrowsableAPIRenderer')
 
+def _comma_separated_env(name: str) -> list[str]:
+    return [item.strip() for item in os.getenv(name, default="").split(",") if item.strip()]
+
+
 # CORS settings
-CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", default="").split(",")
+CORS_ALLOWED_ORIGINS = _comma_separated_env("CORS_ALLOWED_ORIGINS")
 if not CORS_ALLOWED_ORIGINS:
     raise ValueError("CORS_ALLOWED_ORIGINS is not set")
 CORS_ALLOW_CREDENTIALS = True
 
 # CSRF settings
-CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", default="").split(",")
+CSRF_TRUSTED_ORIGINS = _comma_separated_env("CSRF_TRUSTED_ORIGINS")
 if not CSRF_TRUSTED_ORIGINS:
     raise ValueError("CSRF_TRUSTED_ORIGINS is not set")
 
@@ -279,6 +283,7 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", default="587"))
 EMAIL_USE_TLS = True
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", default="10"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
 EMAIL_SUBJECT_PREFIX = ""

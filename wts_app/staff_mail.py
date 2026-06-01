@@ -14,7 +14,6 @@ from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives
 from django.db.models import Q
 from django.template.loader import render_to_string
-from django.urls import reverse
 
 from .models import Feedback
 
@@ -46,10 +45,8 @@ def _staff_recipient_names():
         yield email, recipient_name
 
 
-def send_feedback_submitted_staff_mail(feedback: Feedback, request) -> None:
+def send_feedback_submitted_staff_mail(feedback: Feedback, *, admin_url: str) -> None:
     """Notify all active staff (with email) that a new Feedback row exists."""
-    path = reverse("admin:wts_app_feedback_change", args=[str(feedback.pk)])
-    admin_url = request.build_absolute_uri(path)
     category = feedback.category
     item_label = feedback_category_item_label(category)
     submission_id = str(feedback.pk)
