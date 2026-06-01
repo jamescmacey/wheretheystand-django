@@ -10,4 +10,6 @@ Number of auto updates that were successful, broken down by model:
 Number of auto updates that failed, broken down by model:
 - Bills: {{ summary.failed.bills }}
 
+Auto update logs are stored for seven days before being cleaned up.
+
 Regards

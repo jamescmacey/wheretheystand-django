@@ -8,7 +8,7 @@ from django.db.models import Case, IntegerField, Value, When
 from django.utils import timezone
 from rest_framework import generics, serializers
 
-from ..models import Bill
+from ..models import Bill, VoteStub, HansardSearchResult
 from .base import StandardResultsSetPagination
 from .parliaments import ParliamentSerializer
 from .people import PersonSimpleSerializer
@@ -21,12 +21,26 @@ class BillSimpleSerializer(serializers.ModelSerializer):
         model = Bill
         fields = ['id', 'name', 'ref', 'bill_type', 'status', 'introduction_date', 'last_activity_date']
 
+class HansardSearchResultSimpleSerializer(serializers.ModelSerializer):
+    """Simple serializer for hansard search results with minimal fields."""
+    class Meta:
+        model = HansardSearchResult
+        fields = ['result_id', 'result_sitting_date']
+
+class VoteStubSimpleSerializer(serializers.ModelSerializer):
+    """Simple serializer for vote stubs with minimal fields."""
+    hansard_search_result = HansardSearchResultSimpleSerializer(read_only=True)
+    class Meta:
+        model = VoteStub
+        fields = ['date', 'reading', 'hansard_search_result']
+
 
 class BillSerializer(serializers.ModelSerializer):
     """Full serializer for bills with all fields and related objects."""
     parliaments = ParliamentSerializer(many=True, read_only=True)
     people_responsible = PersonSimpleSerializer(many=True, read_only=True)
-    
+    vote_stubs = VoteStubSimpleSerializer(many=True, read_only=True)
+
     class Meta:
         model = Bill
         fields = '__all__'
@@ -59,6 +73,7 @@ class BillListCreateView(generics.ListCreateAPIView):
         queryset = Bill.objects.prefetch_related(
             'parliaments',
             'people_responsible',
+            'vote_stubs',
         ).all()
 
         search = (self.request.query_params.get('search') or '').strip()
