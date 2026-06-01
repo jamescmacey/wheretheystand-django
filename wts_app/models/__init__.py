@@ -15,7 +15,7 @@ from .parliaments import *  # Parliament
 from .elections import *  # Election
 from .banners import *  # Banner
 from .bills import *  # Bill
-from .votes import *  # Vote and VoteRecord
+from .votes import *  # Vote and VoteRecord, VoteStub
 from .credit_card_expenses import *  # CreditCardReconciliation, CreditCardExpense
 from .gemini import *  # Gemini batch processing
 from .election_donation_returns import *  # ElectionDonationReturn

@@ -8,6 +8,24 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from .bills import Bill
 from .people import Person
 from .parties import Party
+from .hansard import HansardSearchResult
+
+class VoteStub(BaseModel):
+    """
+    A vote stub, based on a Hansard search result
+    """
+    date = models.DateField()
+    hansard_search_result = models.ForeignKey(HansardSearchResult, on_delete=models.CASCADE, related_name='vote_stubs')
+    reading = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(3)])
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name='vote_stubs')
+
+    class Meta:
+        verbose_name_plural = "Vote stubs"
+        ordering = ['-date']
+        unique_together = ['reading', 'bill']
+
+    def __str__(self):
+        return f"{self.bill.name} - {self.reading} reading"
 
 class Vote(BaseModel):
     """
