@@ -56,6 +56,7 @@ class Vote(BaseModel):
     vote_type = models.CharField(max_length=8, choices=TYPES, blank=True, null=True)
     contains_split_party_votes = models.BooleanField(default=False)
 
+    stub = models.OneToOneField(VoteStub, on_delete=models.SET_NULL, related_name='vote', blank=True, null=True)
 
     class Meta:
         verbose_name_plural = "Votes"

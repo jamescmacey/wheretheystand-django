@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'drf_spectacular_sidecar',
     'django_celery_beat',
     'django_celery_results',
+    'algoliasearch_django'
 ]
 
 MIDDLEWARE = [
@@ -250,7 +251,16 @@ CELERY_TASK_ROUTES = {
     "wts_app.hansard.get_daily": {"queue": "hansard"},
 }
 
+# Static URL
 STATIC_URL = f'https://{os.getenv("API_STATIC_CUSTOM_DOMAIN")}/'
+
+# Algolia
+ALGOLIA = {
+    "APPLICATION_ID": os.getenv("ALGOLIA_APPLICATION_ID"),
+    "API_KEY": os.getenv("ALGOLIA_SEARCH_API_KEY"),
+    "INDEX_PREFIX": os.getenv("ALGOLIA_INDEX_PREFIX"),
+    "INDEX_SUFFIX": os.getenv("ALGOLIA_INDEX_SUFFIX"),
+}
 
 # Email settings
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

@@ -15,6 +15,9 @@ from .documents import File
 from django.core.validators import MinValueValidator
 from .documents import Document
 from colorfield.fields import ColorField
+from .site_search import SiteSearch
+
+from celery import current_app
 
 
 class Person(BaseModel):
@@ -32,10 +35,21 @@ class Person(BaseModel):
     cached_colour = ColorField(blank=True, null=True)
     parliament_api_id = models.CharField(max_length=36, blank=True, null=True)
 
-    def save(self, *args, **kwargs):
+    site_search = models.OneToOneField(SiteSearch, on_delete=models.SET_NULL, related_name="person", null=True, blank=True)
+
+    def save(self, *args, update_site_search=True, **kwargs):
         if not self.id or not self.slug:
             self.slug = slugify(self.display_name)
+
         super(Person, self).save(*args, **kwargs)
+
+        if self.id and update_site_search:
+            current_app.send_task("wts_app.site_search.update_person_site_search", kwargs={"person_id": self.id})
+
+    def delete(self, *args, **kwargs):
+        if self.site_search:
+            self.site_search.delete()
+        super(Person, self).delete(*args, **kwargs)
 
     class Meta:
         verbose_name_plural = "People"

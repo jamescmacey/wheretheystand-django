@@ -9,6 +9,9 @@ from .base import BaseModel
 from .documents import File, Document
 from .gazette import GazetteNotice
 from django.core.validators import MinValueValidator
+from .site_search import SiteSearch
+from django.utils.text import slugify
+from celery import current_app
 
 class Electorate(BaseModel):
     """
@@ -31,11 +34,22 @@ class Electorate(BaseModel):
     region = models.TextField()
 
     slug = models.SlugField(unique=True,blank=True,null=True)
+    
+    site_search = models.OneToOneField(SiteSearch, on_delete=models.SET_NULL, related_name="electorate", null=True, blank=True)
 
-    def save(self, *args, **kwargs):
+    def delete(self, *args, **kwargs):
+        if self.site_search:
+            self.site_search.delete()
+        super(Electorate, self).delete(*args, **kwargs)
+
+
+    def save(self, *args, update_site_search=True, **kwargs):
         if not self.id or not self.slug:
             self.slug = slugify(self.name)
         super(Electorate, self).save(*args, **kwargs)
+
+        if self.id and update_site_search:
+            current_app.send_task("wts_app.site_search.update_electorate_site_search", kwargs={"electorate_id": self.id})
 
     def __str__(self):
         return self.name
