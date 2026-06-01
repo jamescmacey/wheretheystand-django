@@ -4,9 +4,9 @@ Vote views.
 Views for Vote and VoteRecord models.
 """
 
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from rest_framework import generics, serializers
-from ..models import Vote, VoteRecord
+from ..models import Person, Vote, VoteRecord, VoteStub, HansardSearchResult
 from .base import StandardResultsSetPagination
 from .bills import BillSimpleSerializer, VALID_BILL_TYPES, _parse_bill_types
 from .people import PersonSimpleSerializer
@@ -21,6 +21,19 @@ class PartySimpleSerializer(serializers.ModelSerializer):
         model = Party
         fields = ['id', 'display_name', 'short_name', 'abbreviation', 'colour', 'slug']
 
+class HansardSearchResultSimpleSerializer(serializers.ModelSerializer):
+    """Simple serializer for hansard search results with minimal fields."""
+    class Meta:
+        model = HansardSearchResult
+        fields = ['result_id', 'result_sitting_date']
+
+class VoteStubSerializer(serializers.ModelSerializer):
+    """Serializer for vote stubs."""
+    hansard_search_result = HansardSearchResultSimpleSerializer(read_only=True)
+    class Meta:
+        model = VoteStub
+        fields = ['date', 'hansard_search_result']
+
 
 class VoteRecordSerializer(serializers.ModelSerializer):
     """Serializer for vote records."""
@@ -33,6 +46,7 @@ class VoteRecordSerializer(serializers.ModelSerializer):
 
 
 VALID_VOTE_TYPE_CODES = {'voice', 'party', 'personal', 'split_party'}
+VALID_VOTE_POSITIONS = {'aye', 'no', 'abstention', 'absent'}
 
 VOTE_LIST_ORDERING = {
     '-date',
@@ -74,7 +88,8 @@ def _apply_vote_type_filters(queryset, vote_types):
 class VoteSimpleSerializer(serializers.ModelSerializer):
     """Simple serializer for votes with minimal fields."""
     bill = BillSimpleSerializer(read_only=True)
-    
+    position = serializers.SerializerMethodField()
+
     class Meta:
         model = Vote
         fields = [
@@ -89,7 +104,20 @@ class VoteSimpleSerializer(serializers.ModelSerializer):
             'motion_agreed',
             'vote_type',
             'contains_split_party_votes',
+            'position',
         ]
+
+    def get_position(self, obj):
+        """This member's vote position when the list is scoped to a person."""
+        if hasattr(obj, 'person_vote_records') and obj.person_vote_records:
+            return obj.person_vote_records[0].position
+        person = self.context.get('person')
+        if person:
+            try:
+                return obj.vote_records.get(person=person).position
+            except VoteRecord.DoesNotExist:
+                return None
+        return None
 
 class VoteSimpleSerializerNoBill(serializers.ModelSerializer):
     """Simple serializer for votes with minimal fields."""
@@ -102,6 +130,7 @@ class VoteSerializer(serializers.ModelSerializer):
     """Full serializer for votes with all fields and related objects."""
     bill = BillSimpleSerializer(read_only=True)
     vote_records = VoteRecordSerializer(many=True, read_only=True)
+    stub = VoteStubSerializer(read_only=True)
     
     class Meta:
         model = Vote
@@ -111,8 +140,20 @@ class VoteSerializer(serializers.ModelSerializer):
 # DRF Views
 class VoteListCreateView(generics.ListCreateAPIView):
     """List all votes or create a new vote."""
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        person_slug = self.request.query_params.get('person_slug')
+        if person_slug:
+            try:
+                context['person'] = Person.objects.get(slug=person_slug)
+            except Person.DoesNotExist:
+                pass
+        return context
+
     def get_queryset(self):
         queryset = Vote.objects.select_related('bill').prefetch_related('vote_records__person', 'vote_records__party').all()
+        person = None
         
         # Optional filtering
         bill_id = self.request.query_params.get('bill', None)
@@ -167,7 +208,28 @@ class VoteListCreateView(generics.ListCreateAPIView):
 
         person_slug = self.request.query_params.get('person_slug', None)
         if person_slug:
-            queryset = queryset.filter(vote_records__person__slug=person_slug).distinct()
+            try:
+                person = Person.objects.get(slug=person_slug)
+                queryset = queryset.filter(vote_records__person=person).distinct()
+                queryset = queryset.prefetch_related(
+                    Prefetch(
+                        'vote_records',
+                        queryset=VoteRecord.objects.filter(person=person),
+                        to_attr='person_vote_records',
+                    )
+                )
+            except Person.DoesNotExist:
+                return Vote.objects.none()
+
+        position = self.request.query_params.get('position', None)
+        if position in VALID_VOTE_POSITIONS:
+            if person:
+                queryset = queryset.filter(
+                    vote_records__person=person,
+                    vote_records__position=position,
+                ).distinct()
+            else:
+                queryset = queryset.filter(vote_records__position=position).distinct()
 
         ordering = self.request.query_params.get('ordering', '-date')
         if ordering in VOTE_LIST_ORDERING:

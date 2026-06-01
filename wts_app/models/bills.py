@@ -5,6 +5,8 @@ Bill model
 from django.db import models
 from .base import BaseModel
 from django.core.validators import MinValueValidator, MaxValueValidator
+from .site_search import SiteSearch
+from celery import current_app
 
 class Bill(BaseModel):
     """
@@ -64,9 +66,21 @@ class Bill(BaseModel):
     flag_scraped_under_v2 = models.BooleanField(default=False)
     flag_enacted_but_missing_assent_number = models.BooleanField(default=False)
 
+    site_search = models.OneToOneField(SiteSearch, on_delete=models.SET_NULL, related_name="bill", null=True, blank=True)
+
     def __str__(self):
         return f'{self.name} (introduced {self.introduction_date})'
 
     class Meta:
         verbose_name_plural = "Bills"
         ordering = ['-introduction_date']
+
+    def save(self, *args, update_site_search=True, **kwargs):
+        super(Bill, self).save(*args, **kwargs)
+        if self.id and update_site_search:
+            current_app.send_task("wts_app.site_search.update_bill_site_search", kwargs={"bill_id": self.id})
+
+    def delete(self, *args, **kwargs):
+        if self.site_search:
+            self.site_search.delete()
+        super(Bill, self).delete(*args, **kwargs)

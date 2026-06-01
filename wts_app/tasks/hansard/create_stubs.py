@@ -1,11 +1,13 @@
 from celery import shared_task
-from wts_app.models import HansardSearchResult, VoteStub, Bill
+from wts_app.models import HansardSearchResult, VoteStub, Bill, Vote
 from django.db import transaction, models
 
 @shared_task(name="wts_app.hansard.create_stubs", queue="celery")
-def create_stubs():
+def create_stubs(all=False):
 
-    hansard_search_results = HansardSearchResult.objects.filter(result_document_subtype="Vote", result_subtitle__in=["First Reading", "Second Reading", "Third Reading"], vote_stubs__isnull=True)
+    hansard_search_results = HansardSearchResult.objects.filter(result_document_subtype="Vote", result_subtitle__in=["First Reading", "Second Reading", "Third Reading"])
+    if not all:
+        hansard_search_results = hansard_search_results.filter(vote_stubs__isnull=True)
     
     for search_result in hansard_search_results.iterator():
         with transaction.atomic():
@@ -53,12 +55,21 @@ def create_stubs():
                 else:
                     existing_vote_stubs.delete()
 
-            VoteStub.objects.create(
+            stub = VoteStub.objects.create(
                 date=sitting_date,
                 hansard_search_result=search_result,
                 reading=reading,
                 bill=bill,
             )
+
+            try:
+                vote = Vote.objects.get(date=sitting_date, reading=reading, bill=bill)
+                vote.stub = stub
+                vote.save()
+            except Vote.DoesNotExist:
+                pass
+
+
 
        
 

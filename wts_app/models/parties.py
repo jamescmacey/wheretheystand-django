@@ -9,6 +9,10 @@ from django.utils import timezone
 from colorfield.fields import ColorField
 from .base import BaseModel
 from django.core.validators import MinValueValidator
+from .site_search import SiteSearch
+
+from django.utils.text import slugify
+from celery import current_app
 
 
 class Party(BaseModel):
@@ -33,16 +37,26 @@ class Party(BaseModel):
 
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
+    site_search = models.OneToOneField(SiteSearch, on_delete=models.SET_NULL, related_name="party", null=True, blank=True)
+
     class Meta:
         verbose_name_plural = "Parties"
 
     def __str__(self):
         return self.display_name
 
-    def save(self, *args, **kwargs):
+    def save(self, *args, update_site_search=True, **kwargs):
         if not self.id or not self.slug:
             self.slug = slugify(self.display_name)
         super(Party, self).save(*args, **kwargs)
+
+        if self.id and update_site_search:
+            current_app.send_task("wts_app.site_search.update_party_site_search", kwargs={"party_id": self.id})
+
+    def delete(self, *args, **kwargs):
+        if self.site_search:
+            self.site_search.delete()
+        super(Party, self).delete(*args, **kwargs)
 
     def change_name(self, legal_name=None, display_name=None, short_name=None,
                    abbreviation=None, colour=None, effective_date=None):
