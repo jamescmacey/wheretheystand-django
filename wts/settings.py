@@ -163,9 +163,23 @@ DATABASES = {
 }
 
 from google.oauth2 import service_account
+import base64
 import json
 
-GCP_PRIVATE_FILES_CREDENTIALS = json.loads(os.getenv("GCP_PRIVATE_FILES_CREDENTIALS"))
+
+def _load_json_env(name: str) -> dict:
+    """Load JSON from a single-line env var, or from {name}_B64 (for docker-compose .env)."""
+    raw = os.getenv(name)
+    if not raw:
+        b64 = os.getenv(f"{name}_B64")
+        if b64:
+            raw = base64.b64decode(b64).decode()
+    if not raw:
+        raise ValueError(f"{name} (or {name}_B64) is not set")
+    return json.loads(raw)
+
+
+GCP_PRIVATE_FILES_CREDENTIALS = _load_json_env("GCP_PRIVATE_FILES_CREDENTIALS")
 GCP_PRIVATE_FILES_BUCKET_NAME = os.getenv("GCP_PRIVATE_FILES_BUCKET_NAME")
 
 # Storage
@@ -216,11 +230,7 @@ STORAGES = {
 }
 
 # Firebase settings
-FIREBASE_CONFIG = os.getenv("FIREBASE_CONFIG")
-if FIREBASE_CONFIG:
-    FIREBASE_CONFIG = json.loads(FIREBASE_CONFIG)
-if not FIREBASE_CONFIG:
-    raise ValueError("FIREBASE_CONFIG is not set")
+FIREBASE_CONFIG = _load_json_env("FIREBASE_CONFIG")
 
 BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; WhereTheyStand/2.0)") 
 
