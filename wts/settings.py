@@ -48,7 +48,8 @@ INSTALLED_APPS = [
     'drf_spectacular_sidecar',
     'django_celery_beat',
     'django_celery_results',
-    'algoliasearch_django'
+    'algoliasearch_django',
+    'anymail'
 ]
 
 MIDDLEWARE = [
@@ -277,13 +278,12 @@ ALGOLIA = {
 }
 
 # Email settings
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = os.getenv("EMAIL_HOST")
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", default="587"))
-EMAIL_USE_TLS = True
-EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", default="10"))
+EMAIL_BACKEND = "anymail.backends.amazon_ses.EmailBackend"
+ANYMAIL = {
+     "AMAZON_SES_CLIENT_PARAMS": {
+        "region_name": "ap-southeast-2",
+    },
+}
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
 EMAIL_SUBJECT_PREFIX = ""
