@@ -26,6 +26,7 @@ from .election_donation_returns import *  # Election donation returns views
 from .feedback import *  # Feedback submission
 from .users import *  # Public user profile
 from .client import *  # Client utilities (random page, etc.)
+from .migration import *  # Legacy v1 ID → v2 UUID lookups
 from .workbooks import *  # Workbook views
 from .workbook_steps import *  # Workbook pipeline steps
 from .system_events import *  # Monitored sources and system events
