@@ -59,6 +59,8 @@ from .views import (
     UserRetrieveView,
     HomepageView,
     RandomPageView,
+    BillLegacyMigrationView,
+    VoteLegacyMigrationView,
     PartyListCreateView,
     PartyRetrieveUpdateDestroyView,
     ParliamentListCreateView,
@@ -204,6 +206,10 @@ urlpatterns = [
     # Client utilities
     path("client/homepage/", HomepageView.as_view(), name="client-homepage"),
     path("client/random/", RandomPageView.as_view(), name="client-random"),
+
+    # Legacy v1 ID → v2 UUID lookups
+    path("migration/bills/<int:legacy_id>/", BillLegacyMigrationView.as_view(), name="migration-bill-legacy"),
+    path("migration/votes/<int:legacy_id>/", VoteLegacyMigrationView.as_view(), name="migration-vote-legacy"),
 
     # Workbook endpoints
     path("workbooks/", WorkbookListCreateView.as_view(), name="workbook-list-create"),
