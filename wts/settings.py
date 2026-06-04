@@ -192,24 +192,24 @@ STORAGES = {
     "default": {
         "BACKEND": "storages.backends.s3.S3Storage",
         "OPTIONS": {
-          "bucket_name": "wheretheystand-public",
+          "bucket_name": os.getenv("MEDIA_BUCKET", "wheretheystand-public"),
           "region_name": "auto",
           "endpoint_url": os.getenv("R2_ENDPOINT_URL"),
           "access_key": os.getenv("R2_ACCESS_KEY_ID"),
           "secret_key": os.getenv("R2_SECRET_ACCESS_KEY"),
-          "custom_domain": "media.wheretheystand.nz",
+          "custom_domain": os.getenv("MEDIA_DOMAIN", "media.wheretheystand.nz"),
         },
     },
     "documents": {
         "BACKEND": "storages.backends.s3.S3Storage",
         "OPTIONS": {
-          "bucket_name": "wheretheystand-public",
+          "bucket_name": os.getenv("MEDIA_BUCKET", "wheretheystand-public"),
           "region_name": "auto",
           "endpoint_url": os.getenv("R2_ENDPOINT_URL"),
           "access_key": os.getenv("R2_ACCESS_KEY_ID"),
           "secret_key": os.getenv("R2_SECRET_ACCESS_KEY"),
           "querystring_auth": False,
-          "custom_domain": "media.wheretheystand.nz",
+          "custom_domain": os.getenv("MEDIA_DOMAIN", "media.wheretheystand.nz"),
         },
     },
     "staticfiles": {

@@ -50,6 +50,18 @@ Staged files remain on **private GCS** until `publish_reconciliation` is committ
 
 See `docs/system-events.md`. Monitored sources create system workbooks and advance steps until review gates.
 
+## Recipe: `user_profile_pictures`
+
+Batch recipe for person profile photos (site profile pictures).
+
+| Step | Purpose | Commit writes |
+|------|---------|---------------|
+| `upload` | Staged image on private GCS | — |
+| `link_entities` | Person, original URL, attribution, copyright metadata | — (validation only) |
+| `publish_profile_picture` | Staff review | Copy to R2 `documents.File` + set `Person.photo` |
+
+Copyright can reference existing `Licence` / `CopyrightParty` rows or inline `*_create` objects in `file_metadata` (resolved on publish). Workbook `batch_defaults` can pre-fill licence and copyright party IDs for all files.
+
 ## Stubs
 
 - `election_donation_return` — registered, not implemented (publish step promotes from GCS)

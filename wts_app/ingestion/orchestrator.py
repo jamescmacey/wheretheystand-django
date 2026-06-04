@@ -297,7 +297,11 @@ def apply_batch_defaults(workbook: Workbook) -> int:
 
     if copyright_patch:
         for workbook_file in workbook.files.all():
-            for step_key in ("publish_reconciliation", "publish_ministerial_list"):
+            for step_key in (
+                "publish_reconciliation",
+                "publish_ministerial_list",
+                "publish_profile_picture",
+            ):
                 publish_step = WorkbookStep.objects.filter(
                     workbook=workbook,
                     workbook_file=workbook_file,
@@ -318,5 +322,29 @@ def apply_batch_defaults(workbook: Workbook) -> int:
                         update_fields=["payload", "status", "updated_at"]
                     )
                     updated += 1
+
+        for workbook_file in workbook.files.all():
+            link_step = WorkbookStep.objects.filter(
+                workbook=workbook,
+                workbook_file=workbook_file,
+                step_key="link_entities",
+            ).first()
+            if (
+                link_step
+                and link_step.status != WorkbookStep.Status.COMMITTED
+                and workbook.recipe_key == "user_profile_pictures"
+            ):
+                payload = {**(link_step.payload or {})}
+                file_metadata = {
+                    **(payload.get("file_metadata") or {}),
+                    **copyright_patch,
+                }
+                payload["file_metadata"] = file_metadata
+                payload["workbook_file_id"] = str(workbook_file.id)
+                link_step.payload = payload
+                if link_step.status == WorkbookStep.Status.PENDING:
+                    link_step.status = WorkbookStep.Status.DRAFT
+                link_step.save(update_fields=["payload", "status", "updated_at"])
+                updated += 1
 
     return updated

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "workbook_file_id": { "type": "string", "format": "uuid" },
+    "file_metadata": { "type": "object" }
+  },
+  "required": ["workbook_file_id"],
+  "additionalProperties": true
+}
