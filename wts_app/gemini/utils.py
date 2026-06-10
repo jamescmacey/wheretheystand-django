@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from typing import Optional, Tuple
 
+from django.utils import timezone
 from google.genai import types
 
-from wts_app.models.gemini import GeminiBatchJob
+from wts_app.models.gemini import GeminiBatchItem, GeminiBatchJob
+
+# Grace period before failing jobs that never received a Gemini batch_name.
+UNSUBMITTED_BATCH_GRACE_PERIOD = timedelta(minutes=2)
 
 
 JOB_STATE_TO_STATUS = {
@@ -46,3 +51,59 @@ def parse_jsonl_response(
         return None, error, payload
     response = types.GenerateContentResponse.model_validate(payload)
     return response, None, payload
+
+
+def fail_gemini_batch_submission(
+    job: GeminiBatchJob,
+    *,
+    error_message: str,
+    item: GeminiBatchItem | None = None,
+) -> None:
+    """Mark pending batch items and the parent job failed."""
+    now = timezone.now()
+    items = job.items.all()
+    if item is not None:
+        items = items.filter(pk=item.pk)
+    items.filter(status=GeminiBatchItem.Status.PENDING).update(
+        status=GeminiBatchItem.Status.FAILED,
+        error_message=error_message,
+        processed_at=now,
+    )
+    job.status = GeminiBatchJob.Status.FAILED
+    job.error_message = error_message
+    job.completed_at = now
+    job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
+
+
+def release_workbook_step_after_failed_gemini(step, error_message: str) -> None:
+    """Return a workbook step to draft so the operator can retry submission."""
+    from wts_app.models.workbook_pipeline import WorkbookStep
+
+    if step.status != WorkbookStep.Status.RUNNING:
+        return
+    step.status = WorkbookStep.Status.DRAFT
+    step.error_message = error_message
+    step.save(update_fields=["status", "error_message", "updated_at"])
+
+
+def fail_stale_unsubmitted_batch_job(job: GeminiBatchJob) -> bool:
+    """Fail jobs that were created locally but never sent to Gemini."""
+    if job.batch_name:
+        return False
+    if job.created_at > timezone.now() - UNSUBMITTED_BATCH_GRACE_PERIOD:
+        return False
+
+    error = job.error_message or "Batch was never submitted to Gemini."
+    pending_items = list(job.items.filter(status=GeminiBatchItem.Status.PENDING))
+    workbook_steps = []
+    for item in pending_items:
+        step = item.content_object
+        from wts_app.models.workbook_pipeline import WorkbookStep
+
+        if isinstance(step, WorkbookStep):
+            workbook_steps.append(step)
+
+    fail_gemini_batch_submission(job, error_message=error)
+    for step in workbook_steps:
+        release_workbook_step_after_failed_gemini(step, error)
+    return True

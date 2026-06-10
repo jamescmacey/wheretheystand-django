@@ -6,7 +6,12 @@ from django.utils import timezone
 
 from wts_app.gemini.client import GeminiClient
 from wts_app.gemini.processors import PROCESSOR_REGISTRY, get_processor
-from wts_app.gemini.utils import map_job_state, normalize_inlined_response, parse_jsonl_response
+from wts_app.gemini.utils import (
+    fail_stale_unsubmitted_batch_job,
+    map_job_state,
+    normalize_inlined_response,
+    parse_jsonl_response,
+)
 from wts_app.models.gemini import GeminiBatchItem, GeminiBatchJob
 
 
@@ -82,9 +87,18 @@ class Command(BaseCommand):
 
         for job in jobs:
             if not job.batch_name:
-                self.stdout.write(
-                    self.style.WARNING(f"Skipping job {job.id}: missing batch_name.")
-                )
+                if fail_stale_unsubmitted_batch_job(job):
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f"Failed unsubmitted job {job.id}: never reached Gemini."
+                        )
+                    )
+                else:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"Skipping job {job.id}: not yet submitted to Gemini."
+                        )
+                    )
                 continue
 
             if dry_run:
