@@ -20,6 +20,37 @@ from wts_app.models.workbook_pipeline import WorkbookStep as WorkbookStepModel
 
 from .base import StepDefinition
 
+# Gemini structured-output schema (use nullable=True, not type unions like ["string", "null"]).
+CREDIT_CARD_GEMINI_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "request_id": {"type": "string"},
+        "concerns": {"type": "string", "nullable": True},
+        "expenses": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "merchant_name": {"type": "string"},
+                    "description": {"type": "string", "nullable": True},
+                    "amount_nzd": {"type": "number", "nullable": True},
+                    "original_currency_code": {"type": "string"},
+                    "original_amount": {"type": "number", "nullable": True},
+                },
+                "required": [
+                    "date",
+                    "merchant_name",
+                    "original_currency_code",
+                    "original_amount",
+                    "amount_nzd",
+                ],
+            },
+        },
+    },
+    "required": ["request_id", "expenses"],
+}
+
 
 def credit_card_statement_file_name(
     *,
@@ -136,6 +167,9 @@ class CreditCardReconciliationRecipe:
             },
         }
         return schemas.get(step_key, {"type": "generic", "title": step_key})
+
+    def gemini_response_schema(self) -> dict:
+        return CREDIT_CARD_GEMINI_RESPONSE_SCHEMA
 
     def build_gemini_prompt(self, step: WorkbookStep) -> str:
         link = self._get_step(step, "link_entities")

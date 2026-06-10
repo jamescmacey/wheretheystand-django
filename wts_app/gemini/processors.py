@@ -19,6 +19,7 @@ from google.genai import types
 
 from wts_app.gemini.client import GeminiClient
 from wts_app.ingestion.orchestrator import complete_async
+from wts_app.ingestion.recipes.credit_card import CREDIT_CARD_GEMINI_RESPONSE_SCHEMA
 from wts_app.ingestion.recipes.registry import get_recipe
 from wts_app.models.credit_card_expenses import (
     CreditCardExpense,
@@ -72,21 +73,32 @@ class GeminiBatchProcessor:
         include_failed: bool,
     ):
         content_type = ContentType.objects.get_for_model(queryset.model)
-        statuses = [
-            GeminiBatchItem.Status.PENDING,
+        blocking_statuses = [
             GeminiBatchItem.Status.SUBMITTED,
             GeminiBatchItem.Status.PROCESSED,
         ]
         if not include_failed:
-            statuses.append(GeminiBatchItem.Status.FAILED)
-        existing_ids = (
+            blocking_statuses.append(GeminiBatchItem.Status.FAILED)
+
+        blocking_ids = set(
             GeminiBatchItem.objects.filter(
                 content_type=content_type,
-                status__in=statuses,
+                status__in=blocking_statuses,
+            ).values_list("object_id", flat=True)
+        )
+        # Only block in-flight pending items once a Gemini batch_name exists.
+        blocking_ids.update(
+            GeminiBatchItem.objects.filter(
+                content_type=content_type,
+                status=GeminiBatchItem.Status.PENDING,
+                job__batch_name__isnull=False,
             )
+            .exclude(job__batch_name="")
             .values_list("object_id", flat=True)
         )
-        return queryset.exclude(id__in=existing_ids)
+        if not blocking_ids:
+            return queryset
+        return queryset.exclude(id__in=blocking_ids)
 
     @staticmethod
     def _serialize_json_safe(value):
@@ -106,35 +118,7 @@ class CreditCardReconciliationProcessor(GeminiBatchProcessor):
 
     name = "credit_card_reconciliation"
 
-    response_schema = {
-        "type": "object",
-        "properties": {
-            "request_id": {"type": "string"},
-            "concerns": {"type": ["string", "null"]},
-            "expenses": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "date": {"type": "string"},
-                        "merchant_name": {"type": "string"},
-                        "description": {"type": ["string", "null"]},
-                        "amount_nzd": {"type": ["number", "null"]},
-                        "original_currency_code": {"type": "string"},
-                        "original_amount": {"type": ["number", "null"]},
-                    },
-                    "required": [
-                        "date",
-                        "merchant_name",
-                        "original_currency_code",
-                        "original_amount",
-                        "amount_nzd",
-                    ],
-                },
-            },
-        },
-        "required": ["request_id", "expenses"],
-    }
+    response_schema = CREDIT_CARD_GEMINI_RESPONSE_SCHEMA
 
     def get_queryset(self, *, ids: Optional[Sequence[str]] = None, include_failed: bool = False):
         queryset = CreditCardReconciliation.objects.select_related("person", "file").all()

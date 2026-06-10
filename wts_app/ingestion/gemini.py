@@ -7,10 +7,15 @@ from django.utils import timezone
 
 from wts_app.gemini.client import GeminiClient
 from wts_app.gemini.processors import get_processor
-from wts_app.gemini.utils import map_job_state
-from wts_app.ingestion.orchestrator import complete_async, start_step
+from wts_app.gemini.utils import (
+    fail_gemini_batch_submission,
+    map_job_state,
+    release_workbook_step_after_failed_gemini,
+)
+from wts_app.ingestion.orchestrator import start_step
 from wts_app.ingestion.recipes.registry import get_recipe
 from wts_app.models import GeminiBatchItem, GeminiBatchJob, WorkbookStep
+
 
 def submit_gemini_for_step(step: WorkbookStep) -> GeminiBatchJob:
     """Submit a single workbook step to Gemini batch processing."""
@@ -40,14 +45,29 @@ def submit_gemini_for_step(step: WorkbookStep) -> GeminiBatchJob:
         status=GeminiBatchItem.Status.PENDING,
         output_index=0,
     )
-    prepared = processor.build_request(item=item, requested_model=requested_model)
+
+    try:
+        prepared = processor.build_request(item=item, requested_model=requested_model)
+    except Exception as exc:
+        error = str(exc)
+        fail_gemini_batch_submission(job, error_message=error, item=item)
+        release_workbook_step_after_failed_gemini(step, error)
+        raise
+
     item.request_payload = prepared.request_payload
     item.save(update_fields=["request_payload", "updated_at"])
 
-    batch_job = client.create_batch_job(
-        model=requested_model,
-        requests=[prepared.request],
-    )
+    try:
+        batch_job = client.create_batch_job(
+            model=requested_model,
+            requests=[prepared.request],
+        )
+    except Exception as exc:
+        error = str(exc)
+        fail_gemini_batch_submission(job, error_message=error, item=item)
+        release_workbook_step_after_failed_gemini(step, error)
+        raise
+
     job.batch_name = batch_job.name
     job.resolved_model = batch_job.model or job.resolved_model
     job.status = map_job_state(batch_job.state)
