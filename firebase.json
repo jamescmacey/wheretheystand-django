@@ -1,0 +1,17 @@
+{
+  "//": [
+    "Firebase project configuration for wheretheystand-elections.",
+    "This repo owns it because Django is the source of truth for the data pushed",
+    "into Firestore. Only rules and indexes are managed here -- the documents",
+    "themselves come from the results worker and from Django's push commands.",
+    "  firebase deploy --only firestore:rules,firestore:indexes"
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "firestore": { "port": 8080 },
+    "ui": { "enabled": true }
+  }
+}

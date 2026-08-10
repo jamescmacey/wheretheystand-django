@@ -1,7 +1,5 @@
-import firebase_admin
-from firebase_admin import credentials, firestore
 from django.core.management.base import BaseCommand, CommandError
-from django.conf import settings
+from wts_app.firebase.client import get_firestore_client
 from wts_app.models import Election, ElectionResultVersion
 
 
@@ -9,13 +7,7 @@ class Command(BaseCommand):
     help = 'Firebase migration command'
 
     def handle(self, *args, **options):
-        # Initialize Firebase Admin SDK
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(settings.FIREBASE_CONFIG)
-            firebase_admin.initialize_app(cred)
-        
-        # Get Firestore client
-        db = firestore.client()
+        db = get_firestore_client()
         
         self.stdout.write(self.style.SUCCESS('Firebase client initialized successfully'))
         

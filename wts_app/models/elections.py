@@ -24,6 +24,10 @@ class Election(BaseModel):
     gazette_notices = models.ManyToManyField(GazetteNotice, blank=True)
     legacy_id = models.IntegerField(unique=True, validators=[MinValueValidator(1)], blank=True, null=True)
 
+    # Advance voting opens before polling day and runs until the day before it.
+    voting_period_start = models.DateField(blank=True, null=True)
+    voting_period_end = models.DateField(blank=True, null=True)
+
     def save(self, *args, **kwargs):
         if not self.id or not self.slug:
             self.slug = slugify(self.name)
@@ -43,8 +47,93 @@ class ElectionResultVersion(BaseModel):
     access_mode = models.CharField(max_length=20, choices=MODES, default="api")
     firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
+    # Whether clients should open a live connection to Firestore for this
+    # version. access_mode alone cannot decide: archived events imported from
+    # Firestore also carry access_mode="firebase". This is also the switch to
+    # flip if the live feed misbehaves during an event -- clients fall back to
+    # the published snapshots within about thirty seconds.
+    is_live = models.BooleanField(default=False)
+
+    # Set once counting is complete and the figures will not change again.
+    is_final = models.BooleanField(default=False)
+
+    # Written by the results worker once it has built reference data for the
+    # event. Django reads this back and never writes it.
+    refdata_built = models.BooleanField(default=False)
+    archived = models.BooleanField(default=False)
+
+    # Results are embargoed until polls close. The worker must not write to
+    # Firestore before embargo_end, because security rules cannot express this
+    # without a document read on every evaluation.
+    embargo_start = models.DateTimeField(blank=True, null=True)
+    embargo_end = models.DateTimeField(blank=True, null=True)
+
+    # Points at which a given proportion of the vote is expected to be counted,
+    # as [{"proportion": 0.5, "target_time": "..."}].
+    result_targets = models.JSONField(blank=True, null=True)
+
+    # Members holding each electorate going into the election, as
+    # [{"persistent_candidate_id": ..., "persistent_party_id": ...,
+    #   "persistent_electorate_id": ...}]. Derivable from parliamentary
+    # affiliations at dissolution, but populated separately for now.
+    incumbents = models.JSONField(blank=True, null=True)
+
+    # How the worker numbers voting places for this event, where it differs.
+    vp_numbering_scheme = models.JSONField(blank=True, null=True)
+
+    # Ordered lists of UUIDs, resolved to Firestore ids when pushed. Ordering is
+    # the point of these, and a many-to-many would lose it without a through
+    # model carrying a position -- more machinery than a handful of curated
+    # entries per event justifies. Validated in clean() instead.
+    comparison_version_ids = models.JSONField(default=list, blank=True)
+    coalition_order_left = models.JSONField(default=list, blank=True)
+    coalition_order_right = models.JSONField(default=list, blank=True)
+
+    archived_url = models.URLField(blank=True, null=True)
+    card_url = models.URLField(blank=True, null=True)
+    vp_finder_url = models.URLField(blank=True, null=True)
+
+    last_firebase_push_at = models.DateTimeField(blank=True, null=True)
+    last_snapshot_published_at = models.DateTimeField(blank=True, null=True)
+
+    # Where this version's payloads were last published. Kept so the manifest
+    # can be rebuilt in full without republishing every election -- publishing
+    # one version must not drop the others from the manifest.
+    snapshot_paths = models.JSONField(default=dict, blank=True)
+
     class Meta:
         unique_together = ('election', 'slug')
+
+    def clean(self):
+        """Check the UUID lists point at rows that exist.
+
+        These fields trade referential integrity for ordering, so the check the
+        database would otherwise do happens here.
+        """
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+
+        missing = self._missing_ids(
+            ElectionResultVersion, self.comparison_version_ids)
+        if missing:
+            errors['comparison_version_ids'] = f"Unknown results versions: {missing}"
+
+        for field in ('coalition_order_left', 'coalition_order_right'):
+            missing = self._missing_ids(PersistentParty, getattr(self, field))
+            if missing:
+                errors[field] = f"Unknown persistent parties: {missing}"
+
+        if errors:
+            raise ValidationError(errors)
+
+    @staticmethod
+    def _missing_ids(model, ids):
+        if not ids:
+            return []
+        found = set(
+            str(pk) for pk in model.objects.filter(id__in=ids).values_list('id', flat=True))
+        return [str(value) for value in ids if str(value) not in found]
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -242,6 +331,57 @@ class ResultsSet(BaseModel):
     total_candidate_informals = models.IntegerField(null=True, blank=True)
     total_candidates = models.IntegerField(null=True, blank=True)
     total_issued_ballot_papers = models.IntegerField(null=True, blank=True)
+
+    # The statistics the Electoral Commission publishes alongside a results set.
+    # Stored as flat columns for querying, but exposed to clients as a nested
+    # object so that the shape matches the Firestore document.
+    STATISTICS_FIELDS = (
+        'total_voting_places_counted',
+        'percent_voting_places_counted',
+        'total_votes_cast',
+        'percent_votes_cast',
+        'total_electorates_final',
+        'percent_electorates_final',
+        'total_minimal_votes',
+        'total_special_votes',
+        'total_registered_parties',
+        'total_voting_places',
+        'total_party_informals',
+        'total_candidate_informals',
+        'total_candidates',
+        'total_issued_ballot_papers',
+    )
+
+    @property
+    def canonical_key(self):
+        """Identify this results set independently of where it came from.
+
+        The same tally arrives from Firestore during an event and from this
+        database afterwards, with different primary keys each time. Clients key
+        results on this instead, so an incoming update replaces the right row
+        whichever transport delivered it. Kept in step with resultsSetKey() in
+        the client's utils/elections/keys.ts.
+        """
+        return ':'.join(str(part) for part in (
+            self.results_level,
+            self.results_category,
+            self.electorate.number if self.electorate_id else '-',
+            self.voting_place.number if self.voting_place_id else '-',
+            self.result_number if self.result_number is not None else '-',
+        ))
+
+    def statistics_payload(self):
+        """The statistics as a nested dict, with every key always present.
+
+        Prefers the flat columns, which the Firestore importer populates, and
+        falls back to the raw ``statistics`` blob for anything missing.
+        """
+        raw = self.statistics or {}
+        payload = {}
+        for name in self.STATISTICS_FIELDS:
+            value = getattr(self, name, None)
+            payload[name] = raw.get(name) if value is None else value
+        return payload
 
     def __str__(self):
         return f"{self.results_version.name} - {self.results_level} - {self.results_category}"
