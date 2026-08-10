@@ -188,6 +188,34 @@ GCP_PRIVATE_FILES_CREDENTIALS = _load_json_env("GCP_PRIVATE_FILES_CREDENTIALS")
 GCP_PRIVATE_FILES_BUCKET_NAME = os.getenv("GCP_PRIVATE_FILES_BUCKET_NAME")
 
 # Storage
+ELECTIONS_SNAPSHOT_DOMAIN = os.getenv("ELECTIONS_SNAPSHOT_DOMAIN",
+                                      "elections-r2.wheretheystand.nz")
+
+
+def _elections_storage(cache_control):
+    """An R2 storage for election snapshots with a given caching policy."""
+    return {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "bucket_name": os.getenv("ELECTIONS_BUCKET", "elections"),
+            "region_name": "auto",
+            "endpoint_url": os.getenv("R2_ENDPOINT_URL"),
+            "access_key": os.getenv("R2_ACCESS_KEY_ID"),
+            "secret_key": os.getenv("R2_SECRET_ACCESS_KEY"),
+            "querystring_auth": False,
+            "custom_domain": ELECTIONS_SNAPSHOT_DOMAIN,
+            # Republishing must replace the object. Without this a second
+            # publish would silently land at manifest_a1b2c3.json and the real
+            # manifest would never change.
+            "file_overwrite": True,
+            "object_parameters": {
+                "CacheControl": cache_control,
+                "ContentType": "application/json",
+            },
+        },
+    }
+
+
 STORAGES = {
     "default": {
         "BACKEND": "storages.backends.s3.S3Storage",
@@ -224,6 +252,18 @@ STORAGES = {
             "custom_domain": os.getenv("API_STATIC_CUSTOM_DOMAIN"),
         },
     },
+    # Election results snapshots, written by wts_app.snapshots and read directly
+    # by the client. Three aliases over one bucket: django-storages sets object
+    # parameters per storage rather than per save, and these need different
+    # caching. The manifest must go stale quickly, because taking an event off
+    # live has to reach clients; the payloads it points at are content addressed
+    # and so can be cached forever; the rolling results file sits in between.
+    "elections_manifest": _elections_storage(
+        "public, max-age=30, stale-while-revalidate=300"),
+    "elections_snapshots": _elections_storage(
+        "public, max-age=31536000, immutable"),
+    "elections_latest": _elections_storage(
+        "public, max-age=60, stale-while-revalidate=600"),
     "private_files": {
         "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
         "OPTIONS": {
@@ -236,6 +276,18 @@ STORAGES = {
 
 # Firebase settings
 FIREBASE_CONFIG = _load_json_env("FIREBASE_CONFIG")
+
+# Whether this environment may WRITE to Firestore. Reading is always allowed.
+# Development and staging share the production service account, so this stays
+# false everywhere except production to stop them pushing over live event data.
+FIREBASE_PUSH_ENABLED = os.getenv("FIREBASE_PUSH_ENABLED", "false").lower() == "true"
+
+# Whether this environment may publish election snapshots to R2. Every
+# environment carries the same R2 credentials, because the same bucket serves
+# media, so without this a development database can overwrite the manifest the
+# live site reads. Publishing to a local directory is never gated.
+ELECTIONS_PUBLISH_ENABLED = os.getenv(
+    "ELECTIONS_PUBLISH_ENABLED", "false").lower() == "true"
 
 BOT_USER_AGENT = os.getenv("BOT_USER_AGENT", default="Mozilla/5.0 (compatible; WhereTheyStand/2.0)") 
 

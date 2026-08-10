@@ -1,0 +1,52 @@
+rules_version = '2';
+
+// Election results are public. Everything readable here is already published,
+// or is about to be: results, the reference data that names them, and the
+// event descriptions.
+//
+// Nothing is writable. Writes come from the results worker and from Django,
+// both using service accounts through the Admin SDK, which bypasses these rules
+// entirely -- so denying every write here costs nothing and closes the door on
+// anyone else.
+//
+// Two things these rules deliberately do not attempt:
+//
+//   Embargo. Expressing "readable only after polls close" would need a document
+//   read on every rule evaluation, which is billed and fragile. The worker must
+//   not write results before the embargo lifts instead.
+//
+//   Rate limiting. Rules cannot do it. A daily spend cap and a budget alert on
+//   the project are the control, along with the is_live switch in Django, which
+//   takes clients off Firestore within about thirty seconds.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Tallies, and the compact per-event summary read by high traffic surfaces.
+    match /results/{document}                { allow read: if true; allow write: if false; }
+    match /results_summary/{document}        { allow read: if true; allow write: if false; }
+    match /statistics/{document}             { allow read: if true; allow write: if false; }
+
+    // Event descriptions, pushed from Django.
+    match /events/{document}                 { allow read: if true; allow write: if false; }
+
+    // Reference data for a single election.
+    match /election_electorates/{document}   { allow read: if true; allow write: if false; }
+    match /election_parties/{document}       { allow read: if true; allow write: if false; }
+    match /election_candidates/{document}    { allow read: if true; allow write: if false; }
+    match /election_voting_places/{document} { allow read: if true; allow write: if false; }
+
+    // Entities that persist across elections, pushed from Django.
+    match /persistent_electorates/{document}   { allow read: if true; allow write: if false; }
+    match /persistent_parties/{document}       { allow read: if true; allow write: if false; }
+    match /persistent_candidates/{document}    { allow read: if true; allow write: if false; }
+    match /persistent_voting_places/{document} { allow read: if true; allow write: if false; }
+
+    // Worker liveness. Readable so a status indicator can show whether results
+    // are still arriving.
+    match /heartbeat/{document}              { allow read: if true; allow write: if false; }
+
+    // poll_series is not published by this site and stays closed.
+    match /{document=**}                     { allow read, write: if false; }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "//": [
+    "Composite indexes for the live results listeners.",
+    "Firestore needs one whenever a query filters on two or more distinct fields.",
+    "Deploy these rather than relying on the create-index link in a console error:",
+    "that link is a development affordance, not a deployment step, and an index",
+    "built for the first time during an event takes minutes the event does not have.",
+    "  firebase deploy --only firestore:indexes"
+  ],
+  "indexes": [
+    {
+      "//": "Overview: the single national party-vote document.",
+      "collectionGroup": "results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "event_id", "order": "ASCENDING" },
+        { "fieldPath": "results_level", "order": "ASCENDING" },
+        { "fieldPath": "results_category", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "One electorate's two documents, and every electorate's when listed.",
+      "collectionGroup": "results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "event_id", "order": "ASCENDING" },
+        { "fieldPath": "results_level", "order": "ASCENDING" },
+        { "fieldPath": "electorate_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Voting places within one electorate, fetched on demand.",
+      "collectionGroup": "results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "event_id", "order": "ASCENDING" },
+        { "fieldPath": "results_level", "order": "ASCENDING" },
+        { "fieldPath": "electorate_id", "order": "ASCENDING" },
+        { "fieldPath": "voting_place_id", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

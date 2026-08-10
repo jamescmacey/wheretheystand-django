@@ -1,7 +1,5 @@
-import firebase_admin
-from firebase_admin import credentials, firestore
 from django.core.management.base import BaseCommand, CommandError
-from django.conf import settings
+from wts_app.firebase.client import get_firestore_client, event_filter
 from django.db import transaction
 from django.utils.dateparse import parse_datetime
 from dateutil import parser as date_parser
@@ -23,13 +21,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        # Initialize Firebase Admin SDK
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(settings.FIREBASE_CONFIG)
-            firebase_admin.initialize_app(cred)
-        
-        # Get Firestore client
-        db = firestore.client()
+        db = get_firestore_client()
         
         self.stdout.write(self.style.SUCCESS('Firebase client initialized successfully'))
         
@@ -144,8 +136,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING('--- Migrating Results Sets ---'))
         try:
             ref = db.collection('results')
-            # Filter by event_id
-            docs = [doc for doc in ref.stream() if doc.to_dict().get('event_id') == event_id]
+            docs = list(event_filter(ref, event_id).stream())
             
             self.stdout.write(f'Found {len(docs)} results sets to migrate')
             
@@ -159,11 +150,14 @@ class Command(BaseCommand):
                 for rs in ResultsSet.objects.filter(results_version=results_version).exclude(firebase_id__isnull=True).exclude(firebase_id='')
             }
             
-            # Prepare data
+            # Prepare data. Both are keyed by firebase_id so that appending a
+            # result is a dict lookup rather than a scan of every results set
+            # collected so far -- with thousands of voting place sets, each
+            # holding ~20 results, a linear scan here is quadratic.
             results_sets_to_create = []
             results_sets_to_update = []
-            results_data_to_create = []  # Store (results_set_data, results_list) tuples
-            results_data_to_update = []  # Store (results_set, results_list) tuples
+            results_data_to_create = {}  # firebase_id -> (results_set_data, results_list)
+            results_data_to_update = {}  # firebase_id -> (results_set, results_list)
             skipped_count = 0
             
             self.stdout.write('Processing results sets...')
@@ -290,10 +284,10 @@ class Command(BaseCommand):
                     rs.total_issued_ballot_papers = total_issued_ballot_papers
                     results_sets_to_update.append(rs)
                     # Initialize results list for this results set
-                    results_data_to_update.append((rs, []))
+                    results_data_to_update[firebase_id] = (rs, [])
                 else:
                     # Store results set data for later creation
-                    results_data_to_create.append((rs_data, []))
+                    results_data_to_create[firebase_id] = (rs_data, [])
                 
                 # Process results array
                 results_array = data.get('results', [])
@@ -343,38 +337,18 @@ class Command(BaseCommand):
                     }
                     
                     if firebase_id in existing_results_sets:
-                        # Find the tuple and append
-                        found = False
-                        for idx, (rss, results_list) in enumerate(results_data_to_update):
-                            if rss.id == rs.id:
-                                results_data_to_update[idx][1].append(result_data)
-                                found = True
-                                break
-                        if not found:
-                            results_data_to_update.append((rs, [result_data]))
+                        results_data_to_update[firebase_id][1].append(result_data)
                     else:
-                        # Find the tuple for this results set and append
-                        found = False
-                        for idx, (rss_data, results_list) in enumerate(results_data_to_create):
-                            if rss_data['firebase_id'] == firebase_id:
-                                results_data_to_create[idx][1].append(result_data)
-                                found = True
-                                break
-                        if not found:
-                            # This shouldn't happen, but handle it
-                            self.stdout.write(self.style.ERROR(
-                                f'  ⚠ Results set {firebase_id}: Could not find results set data for result'
-                            ))
+                        results_data_to_create[firebase_id][1].append(result_data)
             
             # Bulk create/update ResultsSets first
             created_count = 0
             updated_count = 0
             
             # Create ResultsSet objects from data
-            if results_data_to_create:
-                for rs_data, _ in results_data_to_create:
-                    rs = ResultsSet(**rs_data)
-                    results_sets_to_create.append(rs)
+            created_results_sets = {}
+            for rs_data, _ in results_data_to_create.values():
+                results_sets_to_create.append(ResultsSet(**rs_data))
             
             if results_sets_to_create:
                 self.stdout.write(f'Creating {len(results_sets_to_create)} new results sets...')
@@ -426,26 +400,20 @@ class Command(BaseCommand):
             all_results = []
             
             # Create results for newly created results sets
-            if results_data_to_create:
-                for rs_data, results_list in results_data_to_create:
-                    rs = created_results_sets.get(rs_data['firebase_id'])
-                    if rs:
-                        for result_data in results_list:
-                            result = Result(
-                                results_set=rs,
-                                **result_data
-                            )
-                            all_results.append(result)
-            
+            for firebase_id, (rs_data, results_list) in results_data_to_create.items():
+                rs = created_results_sets.get(firebase_id)
+                if not rs:
+                    self.stdout.write(self.style.ERROR(
+                        f'  ⚠ Results set {firebase_id}: not found after creation, results skipped'
+                    ))
+                    continue
+                for result_data in results_list:
+                    all_results.append(Result(results_set=rs, **result_data))
+
             # Create results for updated results sets
-            if results_data_to_update:
-                for rs, results_list in results_data_to_update:
-                    for result_data in results_list:
-                        result = Result(
-                            results_set=rs,
-                            **result_data
-                        )
-                        all_results.append(result)
+            for rs, results_list in results_data_to_update.values():
+                for result_data in results_list:
+                    all_results.append(Result(results_set=rs, **result_data))
             
             if all_results:
                 self.stdout.write(f'Creating {len(all_results)} results...')

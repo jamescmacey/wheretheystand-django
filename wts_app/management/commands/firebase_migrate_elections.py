@@ -1,7 +1,5 @@
-import firebase_admin
-from firebase_admin import credentials, firestore
 from django.core.management.base import BaseCommand, CommandError
-from django.conf import settings
+from wts_app.firebase.client import get_firestore_client, event_filter
 from django.db import transaction
 import json
 
@@ -27,13 +25,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        # Initialize Firebase Admin SDK
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(settings.FIREBASE_CONFIG)
-            firebase_admin.initialize_app(cred)
-        
-        # Get Firestore client
-        db = firestore.client()
+        db = get_firestore_client()
         
         self.stdout.write(self.style.SUCCESS('Firebase client initialized successfully'))
         
@@ -119,7 +111,7 @@ class Command(BaseCommand):
         try:
             ref = db.collection('election_electorates')
             # Filter by event_id
-            docs = [doc for doc in ref.stream() if doc.to_dict().get('event_id') == event_id]
+            docs = list(event_filter(ref, event_id).stream())
             
             self.stdout.write(f'Found {len(docs)} election electorates to migrate')
             
@@ -228,7 +220,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING('--- Migrating Election Voting Places ---'))
         try:
             ref = db.collection('election_voting_places')
-            docs = [doc for doc in ref.stream() if doc.to_dict().get('event_id') == event_id]
+            docs = list(event_filter(ref, event_id).stream())
             
             self.stdout.write(f'Found {len(docs)} election voting places to migrate')
             
@@ -360,7 +352,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING('--- Migrating Election Parties ---'))
         try:
             ref = db.collection('election_parties')
-            docs = [doc for doc in ref.stream() if doc.to_dict().get('event_id') == event_id]
+            docs = list(event_filter(ref, event_id).stream())
             
             self.stdout.write(f'Found {len(docs)} election parties to migrate')
             
@@ -482,7 +474,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING('--- Migrating Election Candidates ---'))
         try:
             ref = db.collection('election_candidates')
-            docs = [doc for doc in ref.stream() if doc.to_dict().get('event_id') == event_id]
+            docs = list(event_filter(ref, event_id).stream())
             
             self.stdout.write(f'Found {len(docs)} election candidates to migrate')
             
