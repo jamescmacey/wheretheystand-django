@@ -247,8 +247,8 @@ class ElectionCandidate(BaseModel):
 
 class PersistentVotingPlace(BaseModel):
     firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
-    latitude = models.FloatField()
-    longitude = models.FloatField()
+    latitude = models.FloatField(blank=True, null=True)
+    longitude = models.FloatField(blank=True, null=True)
     address = models.TextField()
 
     def __str__(self):
@@ -261,8 +261,8 @@ class ElectionVotingPlace(BaseModel):
     physical_electorate = models.ForeignKey(ElectionElectorate, on_delete=models.CASCADE)
     persistent_voting_place = models.ForeignKey(PersistentVotingPlace, on_delete=models.SET_NULL, blank=True, null=True)
     address = models.TextField()
-    latitude = models.FloatField()
-    longitude = models.FloatField()
+    latitude = models.FloatField(blank=True, null=True)
+    longitude = models.FloatField(blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Check that the physical_electorate belongs to the same results_version
