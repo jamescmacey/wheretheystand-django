@@ -265,7 +265,7 @@ class Command(BaseCommand):
                 longitude = data.get('longitude')
                 persistent_voting_place_id = data.get('persistent_voting_place_id')
                 
-                if not number or physical_electorate_id is None or latitude is None or longitude is None:
+                if not number or physical_electorate_id is None:
                     skipped_count += 1
                     continue
                 

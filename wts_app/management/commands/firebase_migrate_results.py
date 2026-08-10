@@ -178,6 +178,8 @@ class Command(BaseCommand):
                 parsed = self.parse_datetime_field(data.get('parsed'))
                 received = self.parse_datetime_field(data.get('received'))
                 is_final = data.get('is_final', False)
+                if not isinstance(is_final, bool):
+                    is_final = False
                 statistics = data.get('statistics')
                 
                 # Extract statistics fields
