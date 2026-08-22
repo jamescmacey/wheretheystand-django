@@ -114,3 +114,41 @@ def send_daily_email_summary(summary: dict) -> None:
                 "Failed to send daily summary to %s",
                 to_email
             )
+
+def send_hark_notification(body: str, url: str = None, sender: str = None, idempotency_key: str = None) -> None:
+    """Send a notification to Hark webhook with the daily summary."""
+    import requests
+
+    if not settings.HARK_WEBHOOK_TOKEN:
+        logger.error("HARK_WEBHOOK_TOKEN is not set. Skipping Hark notification.")
+        raise RuntimeError("HARK_WEBHOOK_TOKEN is not set. Skipping Hark notification.")
+
+    webhook_url = f"{settings.HARK_WEBHOOK_BASE}{settings.HARK_WEBHOOK_TOKEN}"
+
+    payload = {
+        "body": body
+    }
+    if url:
+        payload["url"] = url
+    if sender:
+        payload["title"] = sender
+
+    if idempotency_key:
+        headers = {
+            "Idempotency-Key": idempotency_key
+        }
+    else :
+        headers = {}
+
+    try:
+        response = requests.post(webhook_url, json=payload, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        if response.status_code == 409:
+            logger.warning("Hark notification already sent for this idempotency key.")
+        else:
+            logger.exception("Failed to send notification to Hark webhook")
+            raise
+    except requests.exceptions.RequestException:
+        logger.exception("Failed to send notification to Hark webhook")
+        raise

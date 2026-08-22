@@ -340,6 +340,9 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", default="WhereTheyStand <no
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", default="WhereTheyStand <no-reply@mail.wheretheystand.nz>")
 EMAIL_SUBJECT_PREFIX = ""
 
+HARK_WEBHOOK_TOKEN = os.getenv("HARK_WEBHOOK_TOKEN")
+HARK_WEBHOOK_BASE = os.getenv("HARK_WEBHOOK_BASE", default="https://hark.ryan.ceo/hooks/")
+
 
 AUTH_USER_MODEL = 'wts_app.User'
 

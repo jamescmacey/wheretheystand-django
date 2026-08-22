@@ -44,12 +44,6 @@ class Command(BaseCommand):
             help='Also publish voting place reference data and per-electorate '
                  'results. Several thousand objects; slow.',
         )
-        parser.add_argument(
-            '--rolling',
-            action='store_true',
-            help='Publish results to the short-lived results-latest.json used '
-                 'during a live event, rather than an immutable file.',
-        )
 
     def handle(self, *args, **options):
         versions = builders.publishable_versions()
@@ -85,7 +79,6 @@ class Command(BaseCommand):
             writer,
             versions=versions,
             include_voting_places=options['voting_places'],
-            rolling_results=options['rolling'],
             # A local tree is not what clients read, so do not record its paths
             # as this version's published location.
             record=not options['local'],

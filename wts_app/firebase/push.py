@@ -5,8 +5,13 @@ Django owns two things the results worker does not: the event's own description
 entities that survive across elections (party colours, and the links from
 candidates to people on the site). Both flow outward from here.
 
-Everything else in Firestore -- reference data and the results themselves --
-belongs to the worker. Django reads those and never writes them.
+The results themselves belong to the worker, and Django never writes them.
+Reference data is the worker's too, with one deliberate exception: the
+`persistent_*_id` fields on the `election_*` documents, which say which
+cross-election record each row belongs to. The worker fills those in for the
+rows it recognises; the rest are decided here, by `match_persistent_entities`,
+and pushed back by `push_election_links`. Every write is a merge, so the two
+sides never overwrite each other's fields.
 """
 
 import logging
@@ -15,7 +20,11 @@ from django.utils import timezone
 
 from .client import get_firestore_client, is_firebase_push_enabled
 from ..models.elections import (
+    ElectionCandidate,
+    ElectionElectorate,
+    ElectionParty,
     ElectionResultVersion,
+    ElectionVotingPlace,
     PersistentCandidate,
     PersistentParty,
     PersistentVotingPlace,
@@ -25,6 +34,10 @@ from ..models.electorates import Electorate
 logger = logging.getLogger(__name__)
 
 EVENTS = 'events'
+ELECTION_ELECTORATES = 'election_electorates'
+ELECTION_PARTIES = 'election_parties'
+ELECTION_CANDIDATES = 'election_candidates'
+ELECTION_VOTING_PLACES = 'election_voting_places'
 PERSISTENT_PARTIES = 'persistent_parties'
 PERSISTENT_CANDIDATES = 'persistent_candidates'
 PERSISTENT_ELECTORATES = 'persistent_electorates'
@@ -96,8 +109,10 @@ def _comparison_event_ids(ids):
 def build_event_document(version):
     """The events document for one results version.
 
-    Deliberately omits refdata_built: the worker owns that field, and this
-    payload is always merged rather than replaced so as not to clobber it.
+    Deliberately omits two fields: refdata_built, which the worker owns, and
+    refdata_url, which push_refdata_url writes when reference data is
+    published. This payload is always merged rather than replaced so that a
+    routine push cannot clobber either.
     """
     election = version.election
     return {
@@ -155,6 +170,9 @@ def build_persistent_electorate_document(electorate):
         'status': electorate.status,
         'wts_id': str(electorate.id),
         'wts_slug': electorate.slug,
+        # The Commission's cross-election number. Kept for reference; the
+        # document id is the Django UUID.
+        'legacy_id': electorate.legacy_id,
     }
 
 
@@ -181,6 +199,15 @@ def _write(db, collection, document_id, payload, dry_run):
     return document_id
 
 
+def _delete(db, collection, document_id, dry_run):
+    """Remove a document. Only ever used to clear ids nothing refers to."""
+    if dry_run:
+        logger.info("[dry run] delete %s/%s", collection, document_id)
+        return document_id
+    db.collection(collection).document(str(document_id)).delete()
+    return document_id
+
+
 def push_event(version_id, *, dry_run=False):
     """Push one results version's events document."""
     if not dry_run:
@@ -199,6 +226,122 @@ def push_event(version_id, *, dry_run=False):
             firebase_id=document_id, last_firebase_push_at=timezone.now())
 
     return document_id
+
+
+def push_refdata_url(version, url, *, dry_run=False):
+    """Tell the event document where reference data was published.
+
+    Clients read `refdata_url` to decide where to get the names their tallies
+    refer to: from R2, which is edge cached and costs nothing per reader, or --
+    when the field is absent -- by reading the worker's several hundred
+    reference documents out of Firestore themselves.
+
+    Written on its own rather than as part of build_event_document, because the
+    path is only known once a publish has happened. Merged, so it cannot
+    disturb refdata_built on the same document.
+    """
+    if not dry_run:
+        _require_enabled()
+
+    document_id = event_document_id(version)
+    db = None if dry_run else get_firestore_client()
+    _write(db, EVENTS, document_id, {'refdata_url': url}, dry_run)
+    return document_id
+
+
+# -- persistent links on the worker's reference data -------------------------
+#
+# `match_persistent_entities` decides these in Django, and until they are pushed
+# back they exist only here. That matters because a client reading reference
+# data from Firestore -- which is what every client does until `refdata_url` is
+# set -- resolves persistent links from these fields. Without the push, a
+# candidate curated here still renders with the right name and tally, but does
+# not link through to their profile on the site.
+
+
+class _LinkSpec:
+    """How one election-scoped model's persistent link reaches Firestore."""
+
+    def __init__(self, model, collection, field, related, resolve, resolve_name):
+        self.model = model
+        self.collection = collection
+        self.field = field
+        self.related = related
+        self.resolve = resolve
+        self.resolve_name = resolve_name
+
+    def rows(self, version):
+        return (self.model.objects
+                .filter(results_version=version)
+                .exclude(**{f'{self.related}__isnull': True})
+                .select_related(self.related))
+
+
+LINK_SPECS = {
+    'candidates': _LinkSpec(
+        ElectionCandidate, ELECTION_CANDIDATES, 'persistent_candidate_id',
+        'persistent_candidate',
+        lambda persistent: persistent.firebase_id, 'firebase_id'),
+    'parties': _LinkSpec(
+        ElectionParty, ELECTION_PARTIES, 'persistent_party_id',
+        'persistent_party',
+        lambda persistent: persistent.firebase_id, 'firebase_id'),
+    'voting-places': _LinkSpec(
+        ElectionVotingPlace, ELECTION_VOTING_PLACES, 'persistent_voting_place_id',
+        'persistent_voting_place',
+        lambda persistent: persistent.firebase_id, 'firebase_id'),
+    'electorates': _LinkSpec(
+        ElectionElectorate, ELECTION_ELECTORATES, 'persistent_electorate_id',
+        'electorate',
+        lambda persistent: str(persistent.id), 'id'),
+}
+
+
+def push_election_links(version, only=None, *, dry_run=False):
+    """Write this version's curated persistent links into Firestore.
+
+    Merged one field at a time onto documents the worker owns, so nothing else
+    on them is disturbed. Rows are skipped, with a warning, when there is
+    nothing to write or nowhere to write it:
+
+    - the election row has no `firebase_id`, meaning it was created here rather
+      than imported, and no Firestore document corresponds to it;
+    - the persistent record has no Firestore id, meaning it has not been pushed
+      yet. Run `push_persistent_to_firebase` first.
+
+    Returns a count of documents written per collection.
+    """
+    if not dry_run:
+        _require_enabled()
+
+    names = list(only) if only else sorted(LINK_SPECS)
+    db = None if dry_run else get_firestore_client()
+    written = {}
+
+    for name in names:
+        spec = LINK_SPECS[name]
+        count = 0
+
+        for row in spec.rows(version):
+            if not row.firebase_id:
+                logger.warning(
+                    "%s %s has no Firestore document; %s not pushed",
+                    spec.collection, row.pk, spec.field)
+                continue
+
+            value = spec.resolve(getattr(row, spec.related))
+            if value is None:
+                logger.warning(
+                    "Persistent record for %s %s has no %s; %s not pushed",
+                    spec.collection, row.pk, spec.resolve_name, spec.field)
+                continue
+
+            _write(db, spec.collection, row.firebase_id, {spec.field: value}, dry_run)
+            count += 1
+
+        written[spec.collection] = count
+
+    return written
 
 
 def _push_persistent(model, collection, builder, ids=None, *, dry_run=False,
@@ -244,31 +387,25 @@ def push_persistent_voting_places(ids=None, *, dry_run=False):
 
 
 def push_persistent_electorates(ids=None, *, dry_run=False):
-    """Push persistent electorates.
+    """Push persistent electorates, keyed on the Django UUID.
 
-    Keyed on legacy_id, because that integer is what Firestore documents use to
-    refer to an electorate across elections. An electorate without one is
-    skipped rather than given an invented key, which would not match anything.
+    They used to be keyed on `legacy_id`, which meant an electorate without one
+    could not be pushed at all. Every row has a UUID, so none are skipped now.
+    `legacy_id` is still carried as a field, because it is the Electoral
+    Commission's own cross-election number and worth keeping — it is simply no
+    longer an identifier anything resolves by.
     """
     if not dry_run:
         _require_enabled()
 
-    queryset = Electorate.objects.exclude(legacy_id__isnull=True)
+    queryset = Electorate.objects.all()
     if ids is not None:
         queryset = queryset.filter(id__in=ids)
-
-    skipped = Electorate.objects.filter(legacy_id__isnull=True)
-    if ids is not None:
-        skipped = skipped.filter(id__in=ids)
-    for electorate in skipped:
-        logger.warning(
-            "Electorate %s (%s) has no legacy_id and was not pushed",
-            electorate.name, electorate.id)
 
     db = None if dry_run else get_firestore_client()
     count = 0
     for electorate in queryset:
-        _write(db, PERSISTENT_ELECTORATES, electorate.legacy_id,
+        _write(db, PERSISTENT_ELECTORATES, str(electorate.id),
                build_persistent_electorate_document(electorate), dry_run)
         count += 1
 

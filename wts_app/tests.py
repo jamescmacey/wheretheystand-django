@@ -353,12 +353,19 @@ class SnapshotPublisherTests(TestCase):
         key = f"{self.election.slug}/{self.v.slug}"
         self.assertNotEqual(before[key]["results"], after[key]["results"])
 
-    def test_rolling_results_use_a_stable_path(self):
-        """The refresh loop must not have to rewrite the manifest."""
+    def test_results_are_always_content_addressed(self):
+        """There is no rolling results file for anything to go stale on.
+
+        Clients take live tallies from Firestore, so the only results object
+        published is the immutable one they fall back to when a count ends.
+        """
         writer = publisher.DryRunWriter()
-        published = publisher.publish_all(writer, rolling_results=True)
+        published = publisher.publish_all(writer)
         key = f"{self.election.slug}/{self.v.slug}"
-        self.assertTrue(published[key]["results"].endswith("results-latest.json"))
+        self.assertRegex(published[key]["results"], r"/results-[0-9a-f]{12}\.json$")
+        self.assertNotIn(
+            f"events/{self.election.slug}/{self.v.slug}/results-latest.json",
+            writer.written)
 
     def test_persistent_data_is_shared_across_events(self):
         """Published at the root, so every event references one object."""
@@ -478,10 +485,10 @@ class SnapshotManifestTests(TestCase):
             first = self._manifest(None, root)
             self.assertEqual(len(first["elections"]), 2)
 
-            # Now republish only the live event, as the refresh loop does.
+            # Now republish only one event, as ending a count does.
             publisher.publish_all(
                 publisher.LocalWriter(root),
-                versions=[self.new_version], rolling_results=True)
+                versions=[self.new_version])
             second = self._manifest(None, root)
 
         slugs = {e["slug"] for e in second["elections"]}
@@ -506,6 +513,284 @@ class SnapshotManifestTests(TestCase):
 
         self.old_version.refresh_from_db()
         self.assertEqual(self.old_version.snapshot_paths, {})
+
+
+@override_settings(FIREBASE_PUSH_ENABLED=True)
+class ElectionLinkPushTests(TestCase):
+    """Curated persistent links, written back onto the worker's reference data.
+
+    The worker matches what it recognises and leaves the rest null. Those are
+    decided here, and until they are pushed they exist only here -- so a client
+    reading reference data from Firestore renders the right name and tally but
+    cannot link through to the person.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        nz = dt_timezone(timedelta(hours=13))
+        cls.election = Election.objects.create(
+            name="2026 General Election", polling_date=date(2026, 11, 7),
+            polls_close=datetime(2026, 11, 7, 19, 0, tzinfo=nz))
+        cls.version = ElectionResultVersion.objects.create(
+            election=cls.election, name="Election night", is_primary=True,
+            access_mode="firebase", firebase_id="ge2026_prelim")
+
+        party = PersistentParty.objects.create(
+            display_name="Green Party", firebase_id="pp_green")
+        cls.election_party = ElectionParty.objects.create(
+            results_version=cls.version, number=5, name="Green Party",
+            firebase_id="ep_green", persistent_party=party)
+
+        cls.person = PersistentCandidate.objects.create(
+            display_name="SMITH, Jane", firebase_id="pc_smith")
+        cls.candidate = ElectionCandidate.objects.create(
+            results_version=cls.version, number=42, name="SMITH, Jane",
+            firebase_id="ec_smith", party=cls.election_party,
+            persistent_candidate=cls.person)
+
+    def _pushed(self, **kwargs):
+        """Run a push with the Firestore client stubbed, returning the writes."""
+        from .firebase import push
+
+        writes = []
+
+        def record(db, collection, document_id, payload, dry_run):
+            writes.append((collection, document_id, payload))
+            return document_id
+
+        with patch.object(push, "get_firestore_client", lambda: object()), \
+                patch.object(push, "_write", record):
+            push.push_election_links(self.version, **kwargs)
+        return writes
+
+    def test_a_curated_link_reaches_the_worker_s_document(self):
+        writes = self._pushed(only=["candidates"])
+        self.assertEqual(
+            writes, [("election_candidates", "ec_smith",
+                      {"persistent_candidate_id": "pc_smith"})])
+
+    def test_only_the_link_field_is_written(self):
+        """Everything else on these documents belongs to the worker."""
+        for _, _, payload in self._pushed():
+            self.assertEqual(len(payload), 1)
+            self.assertTrue(next(iter(payload)).startswith("persistent_"))
+
+    def test_unmatched_rows_are_left_alone(self):
+        """A null link is the worker's business, not something to overwrite."""
+        ElectionCandidate.objects.create(
+            results_version=self.version, number=43, name="JONES, Sam",
+            firebase_id="ec_jones")
+        writes = self._pushed(only=["candidates"])
+        self.assertEqual([document for _, document, _ in writes], ["ec_smith"])
+
+    def test_a_row_with_no_firestore_document_is_skipped(self):
+        """Created in Django rather than imported, so there is nowhere to write."""
+        ElectionCandidate.objects.create(
+            results_version=self.version, number=44, name="TAI, Aroha",
+            persistent_candidate=self.person)
+        writes = self._pushed(only=["candidates"])
+        self.assertEqual([document for _, document, _ in writes], ["ec_smith"])
+
+    def test_a_persistent_record_never_pushed_is_skipped(self):
+        """Writing its Django UUID would name a document that does not exist."""
+        self.person.firebase_id = None
+        self.person.save()
+        self.assertEqual(self._pushed(only=["candidates"]), [])
+
+    def test_pushing_is_refused_where_writes_are_disabled(self):
+        from .firebase import push
+
+        with override_settings(FIREBASE_PUSH_ENABLED=False):
+            with self.assertRaises(push.FirebasePushDisabled):
+                push.push_election_links(self.version)
+
+    def test_electorate_links_carry_the_django_uuid(self):
+        """One identity space: Firestore names an electorate by its UUID now."""
+        from .models import Electorate
+
+        electorate = Electorate.objects.create(
+            name="Ilam", legacy_id=17, region="Canterbury",
+            valid_from=date(2020, 1, 1))
+        ElectionElectorate.objects.create(
+            results_version=self.version, number=1, name="Ilam",
+            firebase_id="ee_ilam", electorate=electorate)
+
+        self.assertEqual(
+            self._pushed(only=["electorates"]),
+            [("election_electorates", "ee_ilam",
+              {"persistent_electorate_id": str(electorate.id)})])
+
+
+@override_settings(FIREBASE_PUSH_ENABLED=True)
+class FirebaseIdAlignmentTests(TestCase):
+    """Collapsing two identity spaces into one.
+
+    Persistent documents were keyed by Mongo ObjectId, and electorates by an
+    integer, neither of which is a Django primary key. Aligning them on the UUID
+    removes the translation the client used to have to do.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.aligned = PersistentParty.objects.create(display_name="Aligned Party")
+        cls.aligned.firebase_id = str(cls.aligned.id)
+        cls.aligned.save()
+        cls.legacy = PersistentParty.objects.create(
+            display_name="Legacy Party", firebase_id="5f2b1c9e4d3a2b1c9e4d3a2b")
+        cls.candidate = PersistentCandidate.objects.create(
+            display_name="SMITH, Jane", firebase_id="5f2b1c9e4d3a2b1c9e4d3a2c")
+
+    def test_alignment_rewrites_only_what_differs(self):
+        from django.core.management import call_command
+        from io import StringIO
+
+        call_command('align_firebase_ids', '--no-push', stdout=StringIO())
+
+        self.legacy.refresh_from_db()
+        self.candidate.refresh_from_db()
+        self.aligned.refresh_from_db()
+        self.assertEqual(self.legacy.firebase_id, str(self.legacy.id))
+        self.assertEqual(self.candidate.firebase_id, str(self.candidate.id))
+        self.assertEqual(self.aligned.firebase_id, str(self.aligned.id))
+
+    def test_a_dry_run_changes_nothing(self):
+        from django.core.management import call_command
+        from io import StringIO
+
+        call_command('align_firebase_ids', '--dry-run', stdout=StringIO())
+
+        self.legacy.refresh_from_db()
+        self.assertEqual(self.legacy.firebase_id, "5f2b1c9e4d3a2b1c9e4d3a2b")
+
+    def test_running_twice_is_a_no_op(self):
+        from django.core.management import call_command
+        from io import StringIO
+
+        call_command('align_firebase_ids', '--no-push', stdout=StringIO())
+        second = StringIO()
+        call_command('align_firebase_ids', '--no-push', stdout=second)
+
+        self.assertIn("Re-keyed 0 row(s)", second.getvalue())
+
+    def test_electorates_are_pushed_at_their_uuid(self):
+        """They used to be keyed on legacy_id, so one without it could not go."""
+        from .firebase import push
+        from .models import Electorate
+
+        without = Electorate.objects.create(
+            name="New Seat", region="Auckland", valid_from=date(2026, 1, 1))
+        writes = []
+
+        def record(db, collection, document_id, payload, dry_run):
+            writes.append((collection, str(document_id)))
+            return document_id
+
+        with patch.object(push, "get_firestore_client", lambda: object()), \
+                patch.object(push, "_write", record):
+            count = push.push_persistent_electorates()
+
+        self.assertEqual(count, 1)
+        self.assertEqual(writes, [("persistent_electorates", str(without.id))])
+
+
+@override_settings(ELECTIONS_PUBLISH_ENABLED=True, FIREBASE_PUSH_ENABLED=True,
+                   ELECTIONS_SNAPSHOT_DOMAIN="elections-r2.example.nz")
+class LiveSyncPublishTests(TestCase):
+    """Publishing during a count, once the loop that used to do it is gone.
+
+    Every payload is content addressed, so a publish that does not record its
+    path and rewrite the manifest leaves the object unreachable in the bucket
+    and the manifest pointing at the previous one. That was a real defect: the
+    reference payload was published and its path thrown away.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        nz = dt_timezone(timedelta(hours=13))
+        cls.election = Election.objects.create(
+            name="2026 General Election", polling_date=date(2026, 11, 7),
+            polls_close=datetime(2026, 11, 7, 19, 0, tzinfo=nz))
+        cls.version = ElectionResultVersion.objects.create(
+            election=cls.election, name="Election night", is_primary=True,
+            access_mode="firebase", firebase_id="ge2026_prelim", is_live=True)
+        ElectionElectorate.objects.create(
+            results_version=cls.version, number=1, name="Auckland Central")
+
+    def _publish(self, root, **kwargs):
+        """Run a publish pass with the writer pointed at a directory."""
+        from .firebase import ingest
+        from .snapshots import publisher
+
+        with patch.object(publisher, "StorageWriter",
+                          lambda: publisher.LocalWriter(root)):
+            return ingest.refresh_snapshots(self.version, **kwargs)
+
+    def test_publishing_reference_records_its_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._publish(pathlib.Path(tmp), include_reference=True)
+
+        self.version.refresh_from_db()
+        self.assertRegex(self.version.snapshot_paths["reference"],
+                         r"/reference-[0-9a-f]{12}\.json$")
+        self.assertEqual(result["reference"],
+                         self.version.snapshot_paths["reference"])
+
+    def test_manifest_names_the_reference_just_published(self):
+        """An unreferenced payload is the same as no payload at all."""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._publish(root, include_reference=True)
+            manifest = json.loads((root / "manifest.json").read_text())
+
+            entry = manifest["elections"][0]["results_versions"][0]
+            self.assertEqual(entry["paths"]["reference"],
+                             self.version.snapshot_paths["reference"])
+            self.assertTrue((root / entry["paths"]["reference"]).exists())
+
+    def test_results_only_pass_leaves_the_reference_path_alone(self):
+        """Ending a count republishes results without touching reference data."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._publish(root, include_reference=True)
+            reference = self.version.snapshot_paths["reference"]
+            self._publish(root)
+
+        self.version.refresh_from_db()
+        self.assertEqual(self.version.snapshot_paths["reference"], reference)
+
+    def test_refdata_url_points_at_the_published_reference(self):
+        from .firebase import ingest
+
+        with patch("wts_app.firebase.push.push_refdata_url") as push_url:
+            url = ingest.publish_refdata_url(
+                self.version, "events/2026-general-election/night/reference-abc123def456.json")
+
+        self.assertEqual(
+            url,
+            "https://elections-r2.example.nz/events/2026-general-election/"
+            "night/reference-abc123def456.json")
+        push_url.assert_called_once()
+
+    def test_refdata_url_is_skipped_without_a_firestore_event(self):
+        """Nothing to write it to, and nothing that would read it."""
+        from .firebase import ingest
+
+        self.version.firebase_id = None
+        with patch("wts_app.firebase.push.push_refdata_url") as push_url:
+            self.assertIsNone(
+                ingest.publish_refdata_url(self.version, "reference-abc123def456.json"))
+        push_url.assert_not_called()
+
+    def test_a_refused_firestore_write_does_not_fail_the_publish(self):
+        """refdata_url is a cost saving; the dashboard renders without it."""
+        from .firebase import ingest, push
+
+        with patch("wts_app.firebase.push.push_refdata_url",
+                   side_effect=push.FirebasePushDisabled("nope")):
+            self.assertIsNone(
+                ingest.publish_refdata_url(self.version, "reference-abc123def456.json"))
 
 
 @override_settings(ELECTIONS_PUBLISH_ENABLED=True)
