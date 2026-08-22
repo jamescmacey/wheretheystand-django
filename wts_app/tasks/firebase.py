@@ -6,14 +6,10 @@ wts_app.firebase; these are thin wrappers so it can also be run directly from a
 management command when a broker is not available.
 """
 
-import logging
-
 from celery import shared_task
 
 from ..firebase import ingest, push
 from ..models.elections import ElectionResultVersion
-
-logger = logging.getLogger(__name__)
 
 
 @shared_task(name="wts_app.firebase.push_event")
@@ -61,24 +57,11 @@ def publish_manifest():
 
 @shared_task(name="wts_app.firebase.sync_live_version")
 def sync_live_version(version_id):
-    """Import one live version's results and republish its snapshots."""
+    """Import one version's results from Firestore and publish them.
+
+    A one-shot, not a schedule. Nothing about a live count depends on this
+    running -- clients read Firestore directly -- so there is no periodic
+    variant of it any more.
+    """
     version = ElectionResultVersion.objects.select_related('election').get(id=version_id)
     return ingest.sync_live_version(version)
-
-
-@shared_task(name="wts_app.firebase.refresh_live_snapshots")
-def refresh_live_snapshots():
-    """Run one cycle for every version currently being counted.
-
-    Scheduled through django-celery-beat, and only worth enabling while an
-    event is live. Failures are logged per version rather than raised, so one
-    misbehaving event cannot stop the others from being refreshed.
-    """
-    results = {}
-    for version in ingest.live_versions():
-        try:
-            results[version.firebase_id] = ingest.sync_live_version(version)
-        except Exception:
-            logger.exception("Live sync failed for %s", version.firebase_id)
-            results[version.firebase_id] = {'error': True}
-    return results

@@ -22,7 +22,9 @@ from ..models.elections import ElectionElectorate
 # Cache classes, mapped to the storage aliases configured in settings.
 MANIFEST = 'elections_manifest'
 IMMUTABLE = 'elections_snapshots'
-ROLLING = 'elections_latest'
+# Fixed filenames whose contents change, so they cannot be cached indefinitely.
+# Only the per-electorate voting place files are published this way now.
+SHORT_CACHE = 'elections_latest'
 
 
 def _serialise(payload):
@@ -131,19 +133,15 @@ def publish_reference(writer, version):
                          builders.build_reference(version))
 
 
-def publish_results(writer, version, rolling=False):
+def publish_results(writer, version):
     """Publish the results payload.
 
-    ``rolling`` writes the short-lived ``results-latest.json`` used during an
-    event, which the server-rendered page and the offline fallback both read.
-    Otherwise the payload is content addressed and cached indefinitely.
+    Always content addressed and cached indefinitely. There is no rolling
+    variant any more: during a live count clients read tallies from Firestore
+    directly, and this file is what they fall back to once the count ends.
     """
-    payload = builders.build_results(version)
-    if rolling:
-        path = f"{_event_prefix(version)}/results-latest.json"
-        writer.write(path, _serialise(payload), ROLLING)
-        return path
-    return _write_hashed(writer, _event_prefix(version), 'results', payload)
+    return _write_hashed(writer, _event_prefix(version), 'results',
+                         builders.build_results(version))
 
 
 def publish_voting_places(writer, version):
@@ -159,7 +157,7 @@ def publish_voting_places(writer, version):
         body = _serialise(
             builders.build_voting_places_for_electorate(version, electorate))
         path = f"{prefix}/voting-places/by-electorate/{electorate.number}.json"
-        writer.write(path, body, ROLLING)
+        writer.write(path, body, SHORT_CACHE)
         by_electorate[electorate.number] = path
 
     paths['by_electorate_base'] = f"{prefix}/voting-places/by-electorate/"
@@ -167,27 +165,16 @@ def publish_voting_places(writer, version):
     return paths
 
 
-def publish_version(writer, version, persistent_path, include_voting_places=False,
-                    rolling_results=False):
+def publish_version(writer, version, persistent_path, include_voting_places=False):
     """Publish every payload for one results version and return its paths."""
     paths = {
         'persistent': persistent_path,
         'reference': publish_reference(writer, version),
-        'results': publish_results(writer, version, rolling=rolling_results),
+        'results': publish_results(writer, version),
     }
     if include_voting_places:
         paths['voting_places'] = publish_voting_places(writer, version)
     return paths
-
-
-def publish_rolling_results(writer, version):
-    """Refresh only the rolling results file for a live event.
-
-    The manifest already points at this fixed path, so the refresh loop during
-    an event never has to rewrite the manifest -- which keeps the one mutable
-    pointer stable while results churn every couple of minutes.
-    """
-    return publish_results(writer, version, rolling=True)
 
 
 def publish_manifest(writer, entries_by_election):
@@ -234,14 +221,13 @@ def publish_manifest_only(writer):
     return publish_manifest(writer, build_manifest_entries())
 
 
-def publish_all(writer, versions=None, include_voting_places=False,
-                rolling_results=False, record=True):
+def publish_all(writer, versions=None, include_voting_places=False, record=True):
     """Publish the given versions, then rewrite the manifest in full.
 
     The manifest always describes *every* publishable version, not only the ones
     written on this run. Versions that were not republished are described by the
-    paths recorded when they last were, so publishing a single event -- which is
-    what the refresh loop does during an election -- cannot drop the others.
+    paths recorded when they last were, so publishing a single event cannot drop
+    the others.
 
     Returns a mapping of ``election-slug/version-slug`` to published paths, plus
     the manifest path under the key ``manifest``.
@@ -260,8 +246,7 @@ def publish_all(writer, versions=None, include_voting_places=False,
     for version in versions:
         paths = publish_version(
             writer, version, persistent_path,
-            include_voting_places=include_voting_places,
-            rolling_results=rolling_results)
+            include_voting_places=include_voting_places)
         published[f"{version.election.slug}/{version.slug}"] = paths
         paths_by_version[version.id] = paths
 

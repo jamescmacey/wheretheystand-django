@@ -1,14 +1,15 @@
-"""Pull results from Firestore into Django during a live event.
+"""Pull results from Firestore into Django.
 
-This is the loop that holds the architecture together. The worker writes
-results to Firestore; clients read them live from there. But clients read
-*everything else* -- reference data, party colours, the results a
-server-rendered page shows before its live connection opens -- from published
-snapshots, and those are generated from this database.
+Clients no longer depend on this during a count: they read tallies from
+Firestore directly, and reference data from wherever the event document points
+them. Nothing here has to run for the dashboard to work on the night.
 
-So Django has to keep up during an event. Without this, results would arrive
-with no candidate or party names attached, server-rendered pages would be
-empty, and taking the event off live would fall back to nothing.
+It still matters twice. Running it once after the worker builds reference data
+puts that data on R2 and sets `refdata_url`, which takes several hundred
+document reads per visitor off the Firestore bill. Running it before the count
+is ended -- and again afterwards -- is how results reach this database for the
+permanent archive, and how the published snapshot becomes current enough to be
+worth falling back to.
 """
 
 import logging
@@ -104,31 +105,73 @@ def sync_results(version):
 
 
 def refresh_snapshots(version, *, include_reference=False):
-    """Republish the snapshots clients read.
+    """Republish this version's payloads and the manifest that names them.
 
-    Only the rolling results file is rewritten each cycle. It has a fixed path,
-    so the manifest -- the one mutable pointer clients depend on -- stays still
-    while results churn.
+    Every payload is content addressed, so publishing one produces a path that
+    nothing can reach until the manifest names it. Recording those paths and
+    rewriting the manifest is therefore part of publishing, not an optional
+    extra -- omitting it leaves the object orphaned in the bucket and the
+    manifest pointing at the previous one.
+
+    The manifest is written last, and is rebuilt from the paths each version
+    was last published at, so no other version's payloads are regenerated.
     """
     from ..snapshots import publisher
 
     writer = publisher.StorageWriter()
-    persistent_path = None
+    paths = dict(version.snapshot_paths or {})
 
     if include_reference:
-        persistent_path = publisher.publish_persistent(writer)
-        publisher.publish_reference(writer, version)
+        paths['persistent'] = publisher.publish_persistent(writer)
+        paths['reference'] = publisher.publish_reference(writer, version)
 
-    publisher.publish_rolling_results(writer, version)
+    paths['results'] = publisher.publish_results(writer, version)
 
     ElectionResultVersion.objects.filter(id=version.id).update(
+        snapshot_paths=paths,
         last_snapshot_published_at=timezone.now())
+    version.snapshot_paths = paths
 
-    return {'objects': len(writer.written), 'persistent': persistent_path}
+    publisher.publish_manifest_only(writer)
+
+    return {
+        'objects': len(writer.written),
+        'persistent': paths.get('persistent'),
+        'reference': paths.get('reference') if include_reference else None,
+    }
+
+
+def publish_refdata_url(version, reference_path):
+    """Point the event document at reference data just published to R2.
+
+    A cost saving rather than a requirement: a client that finds no
+    `refdata_url` reads reference data out of Firestore instead and renders
+    exactly the same dashboard. So a Firestore write being refused here is
+    logged and stepped over rather than failing the sync that produced a
+    perfectly good snapshot.
+    """
+    from django.conf import settings
+
+    from . import push
+
+    if not version.firebase_id or not reference_path:
+        return None
+
+    url = (f"https://{settings.ELECTIONS_SNAPSHOT_DOMAIN}/"
+           f"{reference_path.lstrip('/')}")
+    try:
+        push.push_refdata_url(version, url)
+    except push.FirebasePushDisabled:
+        logger.warning(
+            "Firestore writes are disabled; %s will read reference data from "
+            "Firestore rather than %s", version.firebase_id, url)
+        return None
+
+    return url
 
 
 def sync_live_version(version):
-    """One cycle for one live version: import, then republish."""
+    """One pass for one version: import what is new, then publish it."""
     sync_event_metadata(version)
 
     result = {'event_id': version.firebase_id, 'reference_imported': False}
@@ -141,8 +184,12 @@ def sync_live_version(version):
 
     sync_results(version)
 
-    # Republishing reference data only matters on the cycle that imported it;
+    # Republishing reference data only matters on the pass that imported it;
     # after that it is unchanged and its snapshot path would be identical.
     result.update(refresh_snapshots(
         version, include_reference=result['reference_imported']))
+
+    if result['reference_imported']:
+        result['refdata_url'] = publish_refdata_url(version, result['reference'])
+
     return result
