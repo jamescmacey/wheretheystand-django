@@ -6,7 +6,7 @@ database until they are pushed, and Firestore's own copy carries whatever the
 worker managed to match on its own -- which on the 2023 data was well under half.
 
 That gap is visible. A client reading reference data from Firestore, which is
-what every client does until `refdata_url` is set, resolves persistent links
+what every client does until the published paths are set, resolves persistent links
 from these fields. Names and tallies are unaffected; what goes missing is the
 link through to a candidate's profile on the site.
 

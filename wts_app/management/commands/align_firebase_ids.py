@@ -14,9 +14,15 @@ push steps are merges.
 
     python manage.py align_firebase_ids --dry-run
 
+Electorates take a slightly different path, and it is worth knowing which.
+They have no `firebase_id` column -- they were keyed on `legacy_id`, which is
+already on the row -- so nothing in this database changes for them. Their
+Firestore documents still move to the UUID, and the `election_*` references
+still get re-pointed, exactly like the rest.
+
 Order matters, and this command does the first three steps itself:
 
-  1. Point each Django row's `firebase_id` at its own UUID.
+  1. Point each Django row's `firebase_id` at its own UUID, where it has one.
   2. Push the persistent collections, creating documents at the new ids. The
      old ones are left in place -- nothing is deleted here.
   3. Push every results version's links, so `persistent_*_id` on the
@@ -42,10 +48,10 @@ from wts_app.models.elections import (
     PersistentParty,
     PersistentVotingPlace,
 )
+from wts_app.models.electorates import Electorate
 
-# Electorates are absent on purpose: they have no `firebase_id` column. They
-# were keyed on `legacy_id`, and push_persistent_electorates now writes them at
-# their UUID, so nothing in this database has to change for them.
+# Electorates are absent on purpose: they have no `firebase_id` column to
+# re-key. They are still reported and still pushed -- see handle().
 MODELS = {
     'parties': PersistentParty,
     'candidates': PersistentCandidate,
@@ -81,9 +87,17 @@ class Command(BaseCommand):
                     for row in rows:
                         model.objects.filter(id=row.id).update(firebase_id=str(row.id))
 
+        # Reported even though nothing here changes, because a silent omission
+        # in the report someone reads to decide whether to proceed looks exactly
+        # like electorates having been forgotten.
+        self.stdout.write(
+            f'electorates: {Electorate.objects.count()} to move from legacy_id '
+            f'to UUID in Firestore (nothing to re-key in this database)')
+
         if dry_run:
             self.stdout.write(self.style.WARNING(
-                f'\nDry run. {total} row(s) would be re-keyed, and nothing was written '
+                f'\nDry run. {total} row(s) would be re-keyed here, every persistent '
+                'collection would be rewritten at its UUID, and nothing was written '
                 'to Firestore.'))
             return
 

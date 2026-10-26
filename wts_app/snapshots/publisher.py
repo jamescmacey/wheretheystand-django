@@ -231,6 +231,10 @@ def publish_all(writer, versions=None, include_voting_places=False, record=True)
 
     Returns a mapping of ``election-slug/version-slug`` to published paths, plus
     the manifest path under the key ``manifest``.
+
+    Recording the paths also names them on each version's Firestore event
+    document, so the manifest and the event document never describe a different
+    set of payloads.
     """
     from django.utils import timezone
 
@@ -256,10 +260,18 @@ def publish_all(writer, versions=None, include_voting_places=False, record=True)
         writer, build_manifest_entries(paths_by_version))
 
     if record and not isinstance(writer, DryRunWriter):
+        from ..firebase import push
+
         now = timezone.now()
         for version in versions:
+            paths = paths_by_version[version.id]
             ElectionResultVersion.objects.filter(id=version.id).update(
-                snapshot_paths=paths_by_version[version.id],
+                snapshot_paths=paths,
                 last_snapshot_published_at=now)
+            version.snapshot_paths = paths
+            # Name the same paths on the event document, so a live page that
+            # has not re-read the manifest is still pointed at what was just
+            # published. Tolerant: the manifest remains the fallback.
+            push.sync_snapshot_paths(version, paths)
 
     return published
