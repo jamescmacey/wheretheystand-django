@@ -63,31 +63,59 @@ class Command(BaseCommand):
             push._require_enabled()
 
         db = get_firestore_client()
-        total = 0
+        total_stale = 0
+        blocked = []
 
         for name in names:
             collection, model = COLLECTIONS[name]
-            current = {str(value) for value in model.objects.values_list('id', flat=True)}
+            entities = {str(value) for value in model.objects.values_list('id', flat=True)}
+            present = {document.id for document in db.collection(collection).stream()}
 
-            stale = [document.id for document in db.collection(collection).stream()
-                     if document.id not in current]
+            migrated = entities & present
+            unmigrated = entities - present
+            stale = sorted(present - entities)
 
-            self.stdout.write(f'{collection}: {len(stale)} document(s) not a current '
-                              f'Django id, of {len(current)} entities')
+            # Report the collection size first. Without it there is no way to
+            # tell a finished migration from one that never ran: "679 to delete"
+            # means something quite different out of 1358 than out of 679.
+            self.stdout.write(f'{collection}: {len(present)} document(s)')
+            self.stdout.write(
+                f'    {len(migrated)} at a current Django id, of {len(entities)} entities')
+            self.stdout.write(f'    {len(stale)} to delete')
             for document_id in stale[:5]:
-                self.stdout.write(f'    {document_id}')
+                self.stdout.write(f'        {document_id}')
             if len(stale) > 5:
-                self.stdout.write(f'    ... and {len(stale) - 5} more')
+                self.stdout.write(f'        ... and {len(stale) - 5} more')
 
-            if apply:
-                for document_id in stale:
-                    push._delete(db, collection, document_id, dry_run=False)
-                self.stdout.write(self.style.SUCCESS(
-                    f'  deleted {len(stale)} document(s)'))
+            # The hazard this guards against: deleting an old document for an
+            # entity that never got a new one removes it from Firestore
+            # entirely. That is not recoverable from here.
+            if unmigrated:
+                blocked.append((collection, len(unmigrated)))
+                self.stdout.write(self.style.ERROR(
+                    f'    {len(unmigrated)} entities have NO document at their UUID '
+                    f'-- run align_firebase_ids before pruning'))
 
-            total += len(stale)
+            total_stale += len(stale)
+
+        if blocked:
+            raise CommandError(
+                'Refusing to delete anything. These collections have entities with '
+                'no document at their Django id, so the documents below are the only '
+                'copy that exists: '
+                + ', '.join(f'{name} ({count})' for name, count in blocked)
+                + '. Run align_firebase_ids first.')
 
         if not apply:
             self.stdout.write(self.style.WARNING(
-                f'\n{total} document(s) would be deleted. Nothing was written. '
-                'Re-run with --apply once the list looks right.'))
+                f'\n{total_stale} document(s) would be deleted. Nothing was written. '
+                'Re-run with --apply once the counts above look right.'))
+            return
+
+        for name in names:
+            collection, model = COLLECTIONS[name]
+            entities = {str(value) for value in model.objects.values_list('id', flat=True)}
+            for document in db.collection(collection).stream():
+                if document.id not in entities:
+                    push._delete(db, collection, document.id, dry_run=False)
+            self.stdout.write(self.style.SUCCESS(f'{collection}: pruned'))

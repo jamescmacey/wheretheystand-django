@@ -109,10 +109,14 @@ def _comparison_event_ids(ids):
 def build_event_document(version):
     """The events document for one results version.
 
-    Deliberately omits two fields: refdata_built, which the worker owns, and
-    refdata_url, which push_refdata_url writes when reference data is
-    published. This payload is always merged rather than replaced so that a
-    routine push cannot clobber either.
+    Deliberately omits refdata_built, which the worker owns: Django's copy is
+    only as current as the last sync, so writing it back could overwrite the
+    worker's own answer with a stale one. This payload is always merged rather
+    than replaced so that a routine push cannot clobber it.
+
+    `paths` is included, and is the same map the manifest carries for this
+    version, so the two never describe a different set of payloads. It is
+    written here for a save, and by push_snapshot_paths for a publish.
     """
     election = version.election
     return {
@@ -141,7 +145,20 @@ def build_event_document(version):
         'coalition_order_left': _persistent_party_firebase_ids(version.coalition_order_left),
         'coalition_order_right': _persistent_party_firebase_ids(version.coalition_order_right),
         'wts_id': str(version.id),
+        'paths': build_snapshot_paths(version),
     }
+
+
+def build_snapshot_paths(version):
+    """The published payload paths for a version, as the event document carries them.
+
+    The same map the manifest publishes, read from the same field, so a client
+    reading either one is pointed at the same objects. Empty until the version
+    has been published at least once, which is indistinguishable from a worker
+    that has never written the field -- in both cases there is nothing to point
+    at and the client falls back to the manifest.
+    """
+    return dict(version.snapshot_paths or {})
 
 
 def build_persistent_party_document(party):
@@ -228,33 +245,64 @@ def push_event(version_id, *, dry_run=False):
     return document_id
 
 
-def push_refdata_url(version, url, *, dry_run=False):
-    """Tell the event document where reference data was published.
+def push_snapshot_paths(version, paths=None, *, dry_run=False):
+    """Tell the event document where this version's payloads were published.
 
-    Clients read `refdata_url` to decide where to get the names their tallies
-    refer to: from R2, which is edge cached and costs nothing per reader, or --
-    when the field is absent -- by reading the worker's several hundred
-    reference documents out of Firestore themselves.
+    The live dashboard reads `paths` to find reference data: from R2, which is
+    edge cached and costs nothing per reader, or -- when neither this field nor
+    the manifest names it -- by reading the worker's several hundred reference
+    documents out of Firestore itself.
 
-    Written on its own rather than as part of build_event_document, because the
-    path is only known once a publish has happened. Merged, so it cannot
-    disturb refdata_built on the same document.
+    Written on every publish rather than only as part of build_event_document,
+    because the paths are content addressed and so are only known once a publish
+    has happened. Merged, so it cannot disturb refdata_built.
     """
     if not dry_run:
         _require_enabled()
 
     document_id = event_document_id(version)
+    payload = {'paths': build_snapshot_paths(version) if paths is None else dict(paths)}
     db = None if dry_run else get_firestore_client()
-    _write(db, EVENTS, document_id, {'refdata_url': url}, dry_run)
+    _write(db, EVENTS, document_id, payload, dry_run)
     return document_id
+
+
+def sync_snapshot_paths(version, paths=None):
+    """Push the paths if this environment may, and carry on if it may not.
+
+    A cost saving rather than a requirement: a client that finds no usable
+    `paths` here reads them from the manifest, and failing that reads reference
+    data out of Firestore, rendering exactly the same dashboard either way. So a
+    Firestore write failing is logged and stepped over rather than failing the
+    publish that produced a perfectly good snapshot.
+
+    Returns the document id written, or None.
+    """
+    if not version.firebase_id:
+        return None
+
+    try:
+        return push_snapshot_paths(version, paths)
+    except FirebasePushDisabled:
+        logger.warning(
+            "Firestore writes are disabled; %s will read published paths from "
+            "the manifest rather than its event document", version.firebase_id)
+    except Exception:
+        # Deliberately broad: the manifest already names the same paths, so
+        # losing this write costs Firestore reads, not correctness.
+        logger.warning(
+            "Could not write published paths to the %s event document; clients "
+            "will read them from the manifest instead",
+            version.firebase_id, exc_info=True)
+    return None
 
 
 # -- persistent links on the worker's reference data -------------------------
 #
 # `match_persistent_entities` decides these in Django, and until they are pushed
 # back they exist only here. That matters because a client reading reference
-# data from Firestore -- which is what every client does until `refdata_url` is
-# set -- resolves persistent links from these fields. Without the push, a
+# data from Firestore -- which is what every client does until the published
+# paths are set -- resolves persistent links from these fields. Without the push, a
 # candidate curated here still renders with the right name and tally, but does
 # not link through to their profile on the site.
 

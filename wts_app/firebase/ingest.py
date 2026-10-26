@@ -5,8 +5,8 @@ Firestore directly, and reference data from wherever the event document points
 them. Nothing here has to run for the dashboard to work on the night.
 
 It still matters twice. Running it once after the worker builds reference data
-puts that data on R2 and sets `refdata_url`, which takes several hundred
-document reads per visitor off the Firestore bill. Running it before the count
+puts that data on R2 and names it on the event document, which takes several
+hundred document reads per visitor off the Firestore bill. Running it before the count
 is ended -- and again afterwards -- is how results reach this database for the
 permanent archive, and how the published snapshot becomes current enough to be
 worth falling back to.
@@ -118,6 +118,8 @@ def refresh_snapshots(version, *, include_reference=False):
     """
     from ..snapshots import publisher
 
+    from . import push
+
     writer = publisher.StorageWriter()
     paths = dict(version.snapshot_paths or {})
 
@@ -134,40 +136,17 @@ def refresh_snapshots(version, *, include_reference=False):
 
     publisher.publish_manifest_only(writer)
 
+    # The event document carries the same map, so that a page already open --
+    # which will not re-read the manifest for up to its cache lifetime -- is
+    # pointed at what was just published rather than at what it replaced.
+    paths_pushed = push.sync_snapshot_paths(version, paths) is not None
+
     return {
         'objects': len(writer.written),
         'persistent': paths.get('persistent'),
         'reference': paths.get('reference') if include_reference else None,
+        'paths_pushed': paths_pushed,
     }
-
-
-def publish_refdata_url(version, reference_path):
-    """Point the event document at reference data just published to R2.
-
-    A cost saving rather than a requirement: a client that finds no
-    `refdata_url` reads reference data out of Firestore instead and renders
-    exactly the same dashboard. So a Firestore write being refused here is
-    logged and stepped over rather than failing the sync that produced a
-    perfectly good snapshot.
-    """
-    from django.conf import settings
-
-    from . import push
-
-    if not version.firebase_id or not reference_path:
-        return None
-
-    url = (f"https://{settings.ELECTIONS_SNAPSHOT_DOMAIN}/"
-           f"{reference_path.lstrip('/')}")
-    try:
-        push.push_refdata_url(version, url)
-    except push.FirebasePushDisabled:
-        logger.warning(
-            "Firestore writes are disabled; %s will read reference data from "
-            "Firestore rather than %s", version.firebase_id, url)
-        return None
-
-    return url
 
 
 def sync_live_version(version):
@@ -188,8 +167,5 @@ def sync_live_version(version):
     # after that it is unchanged and its snapshot path would be identical.
     result.update(refresh_snapshots(
         version, include_reference=result['reference_imported']))
-
-    if result['reference_imported']:
-        result['refdata_url'] = publish_refdata_url(version, result['reference'])
 
     return result

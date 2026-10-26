@@ -8,8 +8,8 @@ working dashboard.
 Run it twice, deliberately:
 
     # Once, after the worker sets refdata_built. Puts reference data on R2 and
-    # sets refdata_url, taking several hundred document reads per visitor off
-    # the Firestore bill.
+    # names it on the event document, taking several hundred document reads per
+    # visitor off the Firestore bill.
     python manage.py sync_live_elections
 
     # Again immediately BEFORE turning is_live off, so the published snapshot
@@ -108,13 +108,14 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(
                     f'{label}: {detail}results imported, '
                     f'{result.get("objects", 0)} snapshot object(s) published'))
-                if result.get('refdata_url'):
+                if result.get('paths_pushed'):
                     self.stdout.write(
-                        f'  refdata_url -> {result["refdata_url"]}')
-                elif result['reference_imported']:
+                        f'  paths -> {version.firebase_id} '
+                        f'(reference: {result.get("reference") or "unchanged"})')
+                else:
                     self.stdout.write(self.style.WARNING(
-                        '  refdata_url NOT set; clients will read reference '
-                        'data from Firestore instead'))
+                        '  paths NOT written to the event document; clients '
+                        'will read them from the manifest instead'))
 
             except Exception as exc:
                 # One misbehaving event must not stop the others.
@@ -154,6 +155,7 @@ class Command(BaseCommand):
                 '  would NOT import reference data: the worker has not built it yet'))
         elif not has_reference:
             self.stdout.write(self.style.SUCCESS(
-                '  would import reference data, publish it, and set refdata_url'))
-        self.stdout.write('  would import results, publish them, '
-                          'and rewrite the manifest')
+                '  would import reference data and publish it'))
+        self.stdout.write('  would import results, publish them, rewrite the '
+                          'manifest, and name the published paths on the event '
+                          'document')

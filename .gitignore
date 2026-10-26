@@ -232,3 +232,4 @@ staticfiles/
 local_settings.py
 .env
 
+base64
