@@ -281,6 +281,67 @@ class ElectionVotingPlace(BaseModel):
             models.UniqueConstraint(fields=['results_version', 'number'], name='unique_results_version_voting_place_number')
         ]
 
+    # Attributes read by ElectionVotingPlaceIndex in wts_app/index.py. Algolia
+    # records are flat, so anything reached through a relation has to be spelled
+    # out here, and UUIDs have to be strings: the client serialises records to
+    # JSON and a UUID instance is not JSON.
+
+    @property
+    def id_as_str(self):
+        return str(self.id)
+
+    @property
+    def results_version_id_as_str(self):
+        return str(self.results_version_id)
+
+    @property
+    def election_id_as_str(self):
+        return str(self.results_version.election_id)
+
+    @property
+    def event_id(self):
+        """The Firestore events document id for this voting place's version.
+
+        Null until the version has been pushed. Faceted so a client that came in
+        holding an event id can filter on it without first resolving it to a
+        results version.
+        """
+        return self.results_version.firebase_id
+
+    @property
+    def election_name(self):
+        return self.results_version.election.name
+
+    @property
+    def results_version_name(self):
+        return self.results_version.name
+
+    @property
+    def electorate_name(self):
+        return self.physical_electorate.name
+
+    @property
+    def electorate_number(self):
+        return self.physical_electorate.number
+
+    @property
+    def persistent_voting_place_id_as_str(self):
+        if not self.persistent_voting_place_id:
+            return None
+        return str(self.persistent_voting_place_id)
+
+    @property
+    def geoloc(self):
+        """Coordinates in Algolia's `_geoloc` shape, for radius search.
+
+        None where the place has not been geocoded, which leaves `_geoloc` off
+        the record entirely rather than indexing it at (0, 0) in the Gulf of
+        Guinea. Such a record is still found by an address query.
+        """
+        if self.latitude is None or self.longitude is None:
+            return None
+        return {"lat": self.latitude, "lng": self.longitude}
+
     def __str__(self):
         return f"{self.number} - {self.physical_electorate.name} - {self.results_version.name} - {self.results_version.election.name}"
 

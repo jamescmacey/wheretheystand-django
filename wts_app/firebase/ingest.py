@@ -14,6 +14,7 @@ worth falling back to.
 
 import logging
 
+from celery import current_app
 from django.core.management import call_command
 from django.utils import timezone
 
@@ -91,6 +92,13 @@ def sync_reference_data(version):
     logger.info("Syncing reference data for %s", version.firebase_id)
     call_command('firebase_migrate_elections', migrate=True,
                  event_id=version.firebase_id, verbosity=0)
+
+    # The importer bulk_creates voting places, which sends no post_save signal,
+    # so the Algolia index would otherwise stay empty for this version until
+    # someone ran sync_voting_places by hand. Queued rather than called: a
+    # search index being a few seconds behind is not a reason to fail an import.
+    current_app.send_task('wts_app.voting_places.sync_voting_places',
+                          kwargs={'results_version_id': str(version.id)})
     return version.firebase_id
 
 

@@ -9,6 +9,7 @@ from .hansard import get_daily, get_results  # noqa: F401
 from .auto_updates import clean_up_auto_updates, daily_email_summary  # noqa: F401
 from .feedback import notify_staff_feedback_submitted  # noqa: F401
 from .site_search import *
+from .voting_places import sync_voting_places  # noqa: F401
 from .firebase import (  # noqa: F401
     push_event as push_event_to_firebase,
     push_persistent as push_persistent_to_firebase,

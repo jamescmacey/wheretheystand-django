@@ -3,6 +3,7 @@ Django settings for wts project.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -327,6 +328,20 @@ ALGOLIA = {
     "API_KEY": os.getenv("ALGOLIA_SEARCH_API_KEY"),
     "INDEX_PREFIX": os.getenv("ALGOLIA_INDEX_PREFIX"),
     "INDEX_SUFFIX": os.getenv("ALGOLIA_INDEX_SUFFIX"),
+    # Saving a model registered in wts_app/index.py otherwise calls Algolia
+    # inline, in whatever process did the save. Set ALGOLIA_AUTO_INDEXING=False
+    # for a process that saves many of them one at a time -- a data fix looping
+    # over save(), say -- and sync the index afterwards. The election importers
+    # do not need it: they use bulk_create and bulk_update, which send no
+    # post_save signal and so never reach Algolia at all.
+    #
+    # Off by default under the test runner: the tests build voting places and
+    # site search rows, and the credentials here are a real Algolia application,
+    # so leaving it on would have a test run reach the network and write to a
+    # live index. Set the variable explicitly to override either way.
+    "AUTO_INDEXING": os.getenv(
+        "ALGOLIA_AUTO_INDEXING",
+        default="False" if "test" in sys.argv[1:2] else "True") == "True",
 }
 
 # Email settings
