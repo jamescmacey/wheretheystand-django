@@ -30,6 +30,16 @@ service cloud.firestore {
     // Event descriptions, pushed from Django.
     match /events/{document}                 { allow read: if true; allow write: if false; }
 
+    // The running commentary on a count, written by election-feed-worker and,
+    // for a service announcement, by hand in the Firebase console. The console
+    // is not bound by these rules, so denying every write here still leaves
+    // announcements possible.
+    //
+    // This collection lives only in Firestore. Django holds none of it and
+    // publishes none of it, so an archived election has no feed rather than a
+    // published copy of one.
+    match /feed/{document}                   { allow read: if true; allow write: if false; }
+
     // Reference data for a single election.
     match /election_electorates/{document}   { allow read: if true; allow write: if false; }
     match /election_parties/{document}       { allow read: if true; allow write: if false; }

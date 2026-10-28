@@ -38,6 +38,15 @@
         { "fieldPath": "electorate_id", "order": "ASCENDING" },
         { "fieldPath": "voting_place_id", "order": "ASCENDING" }
       ]
+    },
+    {
+      "//": "The feed: one event's latest twenty entries, newest first.",
+      "collectionGroup": "feed",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "event_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
