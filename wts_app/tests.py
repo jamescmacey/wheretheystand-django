@@ -453,6 +453,75 @@ class FirebasePushTests(TestCase):
         self.assertIn("coalition_order_right", caught.exception.message_dict)
 
 
+class ServiceUpdateTests(TestCase):
+    """The one feed entry Django writes.
+
+    Everything else in `feed` comes from election-feed-worker. Django holds no
+    copy of any of it and archives none of it, so the only thing to get right
+    here is the shape of the document the client reads.
+    """
+
+    def test_announcement_carries_the_shared_fields(self):
+        from .firebase import push
+
+        document = push.build_service_update("ge2026", "Counting has paused", "Until 10.30 pm.")
+        self.assertEqual(document["event_id"], "ge2026")
+        self.assertEqual(document["type"], "SERVICE_ANNOUNCEMENT")
+        self.assertEqual(document["title"], "Counting has paused")
+        self.assertEqual(document["body"], "Until 10.30 pm.")
+        self.assertIsInstance(document["timestamp_seconds"], int)
+        # An announcement comes from a person, not from a tally.
+        self.assertIsNone(document["source_timestamp"])
+
+    def test_url_behaviour_decides_how_the_link_opens(self):
+        from .firebase import push
+
+        internal = push.build_service_update(
+            "ge2026", "Title", "", "/elections", "internal")
+        self.assertFalse(internal["metadata"]["external"])
+
+        external = push.build_service_update(
+            "ge2026", "Title", "", "https://example.org", "external")
+        self.assertTrue(external["metadata"]["external"])
+
+    def test_an_announcement_without_a_url_opens_nothing(self):
+        from .firebase import push
+
+        document = push.build_service_update("ge2026", "Title", "Body")
+        self.assertIsNone(document["metadata"]["url"])
+        self.assertFalse(document["metadata"]["external"])
+
+    def test_an_unknown_url_behaviour_is_rejected(self):
+        from .firebase import push
+
+        with self.assertRaises(ValueError):
+            push.build_service_update("ge2026", "Title", "", "/x", "popup")
+
+    def test_ids_are_ordered_and_do_not_collide(self):
+        from .firebase import push
+
+        first = push.service_update_id("ge2026")
+        second = push.service_update_id("ge2026")
+        self.assertTrue(first.startswith("ge2026:SERVICE_ANNOUNCEMENT:"))
+        # Millisecond resolution, so two in the same second are two documents.
+        self.assertLessEqual(first, second)
+
+    def test_posting_refuses_to_write_when_disabled(self):
+        from .firebase import push
+
+        with override_settings(FIREBASE_PUSH_ENABLED=False):
+            with self.assertRaises(push.FirebasePushDisabled):
+                push.push_service_update("ge2026", "Title", "Body")
+
+    def test_a_dry_run_needs_no_credentials_and_writes_nothing(self):
+        from .firebase import push
+
+        with override_settings(FIREBASE_PUSH_ENABLED=False):
+            document_id = push.push_service_update(
+                "ge2026", "Title", "Body", dry_run=True)
+        self.assertTrue(document_id.startswith("ge2026:SERVICE_ANNOUNCEMENT:"))
+
+
 class SnapshotManifestTests(TestCase):
     """Publishing one event must not remove the others from the manifest."""
 

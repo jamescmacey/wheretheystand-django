@@ -34,6 +34,7 @@ from ..models.electorates import Electorate
 logger = logging.getLogger(__name__)
 
 EVENTS = 'events'
+FEED = 'feed'
 ELECTION_ELECTORATES = 'election_electorates'
 ELECTION_PARTIES = 'election_parties'
 ELECTION_CANDIDATES = 'election_candidates'
@@ -468,3 +469,85 @@ def push_all_persistent(*, dry_run=False):
         'persistent_electorates': push_persistent_electorates(dry_run=dry_run),
         'persistent_voting_places': push_persistent_voting_places(dry_run=dry_run),
     }
+
+
+# ---------------------------------------------------------------------------
+# The feed
+#
+# `election-feed-worker` writes almost all of it: lead changes, voting places
+# reporting, the projected composition moving. Django writes one type, the
+# service announcement, and holds no copy of any of it.
+#
+# Deliberately nothing else. There is no model, no admin and no archive: the
+# feed lives entirely in Firestore, so an archived election shows no feed
+# rather than a published copy of one.
+# ---------------------------------------------------------------------------
+
+SERVICE_ANNOUNCEMENT = 'SERVICE_ANNOUNCEMENT'
+
+#: How an announcement's link should open. `internal` navigates within the
+#: site, `external` opens a new tab. Written alongside the URL rather than
+#: guessed from it, because an absolute URL on this site's own domain should
+#: still navigate internally.
+URL_BEHAVIOURS = {'internal': False, 'external': True}
+
+
+def service_update_id(event_id, now=None):
+    """A document id for an announcement.
+
+    Time ordered within an event, so the ids sort the way the feed does and a
+    second announcement in the same second does not land on the first.
+    """
+    moment = now or timezone.now()
+    return f"{event_id}:{SERVICE_ANNOUNCEMENT}:{int(moment.timestamp() * 1000)}"
+
+
+def build_service_update(event_id, title, body, url=None, url_behaviour='internal',
+                         now=None):
+    """One announcement, in the shape the worker writes its own messages in.
+
+    The same shared fields as everything else in the collection -- the client
+    reads one contract and does not care which writer produced a document.
+    """
+    if url_behaviour not in URL_BEHAVIOURS:
+        raise ValueError(
+            f"url_behaviour must be one of {sorted(URL_BEHAVIOURS)}, not {url_behaviour!r}")
+
+    moment = now or timezone.now()
+
+    return {
+        'event_id': event_id,
+        'type': SERVICE_ANNOUNCEMENT,
+        'title': title,
+        'body': body or '',
+        # The moment it was posted, which is what orders the feed and what a
+        # reader sees. The worker stamps its own messages the same way.
+        'timestamp': moment,
+        'timestamp_seconds': int(moment.timestamp()),
+        # An announcement comes from a person, not from a tally.
+        'source_timestamp': None,
+        'metadata': {
+            'url': url or None,
+            'external': URL_BEHAVIOURS[url_behaviour] if url else False,
+        },
+    }
+
+
+def push_service_update(event_id, title, body, url=None, url_behaviour='internal',
+                        document_id=None, *, dry_run=False):
+    """Post a service announcement to an event's feed.
+
+    `document_id` targets an existing announcement, so a wrong one can be
+    corrected rather than contradicted by a second entry. Left out, a new id is
+    generated from the clock.
+    """
+    if not dry_run:
+        _require_enabled()
+
+    now = timezone.now()
+    payload = build_service_update(event_id, title, body, url, url_behaviour, now=now)
+    document_id = document_id or service_update_id(event_id, now)
+
+    db = None if dry_run else get_firestore_client()
+    _write(db, FEED, document_id, payload, dry_run)
+    return document_id
