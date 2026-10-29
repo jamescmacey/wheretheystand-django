@@ -5,6 +5,7 @@ Election model.
 """
 
 from django.db import models
+from django.core.files.storage import storages
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .base import BaseModel
 from django.utils.text import slugify
@@ -35,6 +36,19 @@ class Election(BaseModel):
 
     def __str__(self):
         return f'{self.name} ({self.polling_date})'
+
+def card_image_upload_to(instance, filename):
+    return f"elections/cards/{instance.id}/{filename}"
+
+
+def card_image_storage():
+    """Public media, served unsigned.
+
+    A social card URL is fetched by crawlers long after it was published, so a
+    signed URL from the default storage would stop resolving.
+    """
+    return storages["documents"]
+
 
 class ElectionResultVersion(BaseModel):
     election = models.ForeignKey(Election, on_delete=models.CASCADE)
@@ -72,12 +86,6 @@ class ElectionResultVersion(BaseModel):
     # as [{"proportion": 0.5, "target_time": "..."}].
     result_targets = models.JSONField(blank=True, null=True)
 
-    # Members holding each electorate going into the election, as
-    # [{"persistent_candidate_id": ..., "persistent_party_id": ...,
-    #   "persistent_electorate_id": ...}]. Derivable from parliamentary
-    # affiliations at dissolution, but populated separately for now.
-    incumbents = models.JSONField(blank=True, null=True)
-
     # How the worker numbers voting places for this event, where it differs.
     vp_numbering_scheme = models.JSONField(blank=True, null=True)
 
@@ -86,11 +94,26 @@ class ElectionResultVersion(BaseModel):
     # model carrying a position -- more machinery than a handful of curated
     # entries per event justifies. Validated in clean() instead.
     comparison_version_ids = models.JSONField(default=list, blank=True)
-    coalition_order_left = models.JSONField(default=list, blank=True)
-    coalition_order_right = models.JSONField(default=list, blank=True)
+
+    # The two political blocs, as ordered PersistentParty UUIDs, so that parties
+    # likely to govern together are drawn together rather than by size. One rule
+    # decides the whole seating plan: [*left, *cross-bench, *right] reads from
+    # the far left of the chamber to the far right. So the left list is written
+    # far-left first and the right list centre first, and a party in neither
+    # list is cross-bench and sits in the middle. "Bloc" rather than
+    # "coalition": before an election there is no agreement, only an alignment.
+    bloc_order_left = models.JSONField(default=list, blank=True)
+    bloc_order_right = models.JSONField(default=list, blank=True)
 
     archived_url = models.URLField(blank=True, null=True)
     card_url = models.URLField(blank=True, null=True)
+
+    # Social card image for this version, published in the manifest as
+    # `card_image_url`. Uploaded here rather than named by URL so there is one
+    # place to put it, and because the client only ever reads the manifest.
+    card_image = models.ImageField(
+        upload_to=card_image_upload_to, storage=card_image_storage,
+        blank=True, null=True)
     vp_finder_url = models.URLField(blank=True, null=True)
 
     last_firebase_push_at = models.DateTimeField(blank=True, null=True)
@@ -119,10 +142,18 @@ class ElectionResultVersion(BaseModel):
         if missing:
             errors['comparison_version_ids'] = f"Unknown results versions: {missing}"
 
-        for field in ('coalition_order_left', 'coalition_order_right'):
+        for field in ('bloc_order_left', 'bloc_order_right'):
             missing = self._missing_ids(PersistentParty, getattr(self, field))
             if missing:
                 errors[field] = f"Unknown persistent parties: {missing}"
+
+        # A party in both blocs would be seated twice, and the ordering rule
+        # could not say where.
+        both = ({str(value) for value in self.bloc_order_left or []}
+                & {str(value) for value in self.bloc_order_right or []})
+        if both:
+            errors['bloc_order_right'] = (
+                f"Already in the left bloc: {sorted(both)}")
 
         if errors:
             raise ValidationError(errors)
@@ -145,6 +176,13 @@ class ElectionResultVersion(BaseModel):
                 election=self.election, is_primary=True
             ).exclude(pk=self.pk).update(is_primary=False)
         super().save(*args, **kwargs)
+
+    @property
+    def card_image_url(self):
+        """The public URL of the card image, or None where none is set."""
+        if not self.card_image:
+            return None
+        return self.card_image.url
 
     def __str__(self):
         return f'{self.name} ({self.election.name})'
@@ -244,6 +282,127 @@ class ElectionCandidate(BaseModel):
 
     def __str__(self):
         return f"{self.name} - {self.results_version.name} - {self.results_version.election.name}"
+
+class ElectorateIncumbent(BaseModel):
+    """Who held an electorate going into one results version.
+
+    The dashboard can say who won a seat; without this it cannot say whether
+    that is a change. Three cases have to be told apart -- the same member
+    standing again, the incumbent party standing somebody else, and a sitting
+    member standing for another party or as an independent -- and only the last
+    of those needs curating here. The other two are derived on the client by
+    matching these persistent records against the version's own candidate list,
+    which is authoritative and cannot drift out of step with itself.
+
+    `persistent_party` is the party the seat was *won* for, which is what a flip
+    is measured against. Where the member has since left it, `has_left_party`
+    says so and `current_persistent_party` says where they sit now -- null
+    there means they sit as an independent. That pair is curated because a
+    member who crossed the floor and is not standing again leaves nothing in the
+    candidate list to derive it from.
+    """
+
+    results_version = models.ForeignKey(
+        ElectionResultVersion, on_delete=models.CASCADE, db_index=True,
+        related_name='electorate_incumbents')
+
+    # The persistent electorate. Named for the model it points at, matching
+    # ElectionElectorate.electorate: there is no PersistentElectorate, because
+    # an electorate already survives across elections.
+    electorate = models.ForeignKey(Electorate, on_delete=models.CASCADE)
+
+    # Null where the seat was vacant going into the election.
+    persistent_candidate = models.ForeignKey(
+        PersistentCandidate, on_delete=models.SET_NULL, blank=True, null=True)
+    persistent_party = models.ForeignKey(
+        PersistentParty, on_delete=models.SET_NULL, blank=True, null=True)
+
+    has_left_party = models.BooleanField(default=False)
+    current_persistent_party = models.ForeignKey(
+        PersistentParty, on_delete=models.SET_NULL, blank=True, null=True,
+        related_name='+')
+
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['results_version', 'electorate'],
+                name='unique_results_version_electorate_incumbent'),
+        ]
+
+    @property
+    def sitting_persistent_party_id(self):
+        """The party the member sits for now, which is what seat counts use.
+
+        Null where they sit as an independent or the seat is vacant.
+        """
+        if not self.has_left_party:
+            return self.persistent_party_id
+        return self.current_persistent_party_id
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if (self.current_persistent_party_id
+                and self.current_persistent_party_id == self.persistent_party_id):
+            errors['current_persistent_party'] = (
+                "This is the party the seat was won for, so it is not a defection. "
+                "Leave it empty.")
+        if self.current_persistent_party_id and not self.has_left_party:
+            errors['has_left_party'] = (
+                "Tick this where the member now sits for another party.")
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f"{self.electorate.name} - {self.results_version.name}"
+
+
+class PartyIncumbent(BaseModel):
+    """How many seats a party held going into one results version.
+
+    The baseline for "+3" or "-2" beside a party on the night. These are the
+    seats held **at dissolution**, counting where each member sits now rather
+    than the party they were elected for -- a member who crossed the floor
+    stopped counting towards their old party's total the day they did it. That
+    is the figure a reader compares an election result against, and it is the
+    one thing about these numbers that is easy to get wrong.
+
+    List seats cannot be derived from anything this database holds, which is why
+    both counts are curated rather than computed. `copy_incumbents` reports
+    where `electorate_seats` disagrees with the ElectorateIncumbent rows.
+    """
+
+    results_version = models.ForeignKey(
+        ElectionResultVersion, on_delete=models.CASCADE, db_index=True,
+        related_name='party_incumbents')
+    persistent_party = models.ForeignKey(PersistentParty, on_delete=models.CASCADE)
+    electorate_seats = models.PositiveSmallIntegerField(default=0)
+    list_seats = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['results_version']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['results_version', 'persistent_party'],
+                name='unique_results_version_party_incumbent'),
+        ]
+
+    @property
+    def total_seats(self):
+        return self.electorate_seats + self.list_seats
+
+    def __str__(self):
+        return (f"{self.persistent_party} - {self.total_seats} seat(s)"
+                f" - {self.results_version.name}")
+
 
 class PersistentVotingPlace(BaseModel):
     firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
@@ -422,13 +581,39 @@ class ResultsSet(BaseModel):
         results on this instead, so an incoming update replaces the right row
         whichever transport delivered it. Kept in step with resultsSetKey() in
         the client's utils/elections/keys.ts.
+
+        The last component separates sets that are otherwise identical. The
+        Commission has published advance votes and polling-day votes as
+        separate sets for the same voting place before, and may again, so at
+        voting place level, level, category, electorate and place together do
+        not identify a tally. ``result_number`` is the field meant to say which
+        one it is; nothing populates it, because nothing in the feed has been
+        confirmed to carry the ordinal. Until something does, the Firestore
+        document id stands in: it is the one discriminator both transports
+        hold, since ``firebase_id`` *is* that id. Without it, two such sets
+        collapse onto one key and the client keeps whichever arrived with the
+        later timestamp -- the place reads low by exactly the set that was
+        dropped, and nothing says so.
+
+        The document id is used at voting place level only. National and
+        electorate tallies are unique per level, category and electorate
+        already, and a set of theirs that predates Firestore has no
+        ``firebase_id``; keying on one would make a published tally and its
+        live twin two separate entries rather than one replacing the other.
         """
+        if self.result_number is not None:
+            discriminator = self.result_number
+        elif self.results_level == 'voting_place':
+            discriminator = self.firebase_id or '-'
+        else:
+            discriminator = '-'
+
         return ':'.join(str(part) for part in (
             self.results_level,
             self.results_category,
             self.electorate.number if self.electorate_id else '-',
             self.voting_place.number if self.voting_place_id else '-',
-            self.result_number if self.result_number is not None else '-',
+            discriminator,
         ))
 
     def statistics_payload(self):

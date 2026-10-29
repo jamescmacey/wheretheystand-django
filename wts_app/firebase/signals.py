@@ -3,7 +3,7 @@
 Two things travel automatically, and both are small and singular:
 
 - The **Firestore events document**, which is what the results worker and the
-  client read for the event's dates, embargo and coalition ordering. One row per
+  client read for the event's dates, embargo and bloc ordering. One row per
   results version, and getting it wrong during an event is the expensive failure.
 - The **published manifest**, which carries `is_live`, `is_final` and the
   version's name. The client never reads this database -- it reads the manifest

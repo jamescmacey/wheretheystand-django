@@ -40,6 +40,21 @@
       ]
     },
     {
+      "//": [
+        "One voting place's page: every electorate it issued votes for.",
+        "The index above cannot serve this. electorate_id sits between",
+        "results_level and voting_place_id, so a query that leaves it",
+        "unconstrained is not a prefix of that index."
+      ],
+      "collectionGroup": "results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "event_id", "order": "ASCENDING" },
+        { "fieldPath": "results_level", "order": "ASCENDING" },
+        { "fieldPath": "voting_place_id", "order": "ASCENDING" }
+      ]
+    },
+    {
       "//": "The feed: one event's latest twenty entries, newest first.",
       "collectionGroup": "feed",
       "queryScope": "COLLECTION",

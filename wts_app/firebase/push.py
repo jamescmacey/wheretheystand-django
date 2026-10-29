@@ -1,7 +1,7 @@
 """Push curated election data from Django into Firestore.
 
 Django owns two things the results worker does not: the event's own description
-(names, dates, embargo, coalition ordering, incumbents) and the persistent
+(names, dates, embargo, bloc ordering, incumbents) and the persistent
 entities that survive across elections (party colours, and the links from
 candidates to people on the site). Both flow outward from here.
 
@@ -91,7 +91,7 @@ def _persistent_party_firebase_ids(ids):
             resolved.append(firebase_id)
         else:
             logger.warning(
-                "Persistent party %s has no Firestore id; dropped from coalition order",
+                "Persistent party %s has no Firestore id; dropped from the bloc order",
                 value)
     return resolved
 
@@ -141,13 +141,31 @@ def build_event_document(version):
         'vp_finder_url': version.vp_finder_url,
         'vp_numbering_scheme': version.vp_numbering_scheme,
         'result_targets': version.result_targets or [],
-        'incumbents': version.incumbents or [],
+        # Incumbency as persistent ids, the same shape the manifest carries, so
+        # a client reading either is told the same thing. Resolved to Firestore
+        # ids is unnecessary: persistent entities are keyed by their Django UUID
+        # in Firestore too, since align_firebase_ids.
+        'incumbents': build_incumbency(version),
         'comparison_events': _comparison_event_ids(version.comparison_version_ids),
-        'coalition_order_left': _persistent_party_firebase_ids(version.coalition_order_left),
-        'coalition_order_right': _persistent_party_firebase_ids(version.coalition_order_right),
+        'bloc_order_left': _persistent_party_firebase_ids(version.bloc_order_left),
+        'bloc_order_right': _persistent_party_firebase_ids(version.bloc_order_right),
         'wts_id': str(version.id),
         'paths': build_snapshot_paths(version),
     }
+
+
+def build_incumbency(version):
+    """Who held what going into this version, for the event document.
+
+    Shares its shape with the manifest by sharing its builder, so the live and
+    archived paths cannot disagree about who is defending a seat. Empty lists
+    rather than an absent key: this document is always written in full for the
+    fields Django owns, and a merge that left the key out would strand whatever
+    a previous push put there.
+    """
+    from ..snapshots import builders
+
+    return builders.build_incumbency(version) or {'electorates': [], 'parties': []}
 
 
 def build_snapshot_paths(version):

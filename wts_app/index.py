@@ -78,6 +78,12 @@ class ElectionVotingPlaceIndex(AlgoliaIndex):
             "filterOnly(election)",
             "filterOnly(event)",
             "filterOnly(persistent_voting_place)",
+            # Declared so that looking one place up by its number is a filter
+            # rather than a text search: the voting place page is given a
+            # number and needs that exact record, not the best match for it.
+            # Algolia applies numeric filters without the declaration, so this
+            # states the intent rather than enabling it.
+            "filterOnly(number)",
             "electorate_name",
         ],
         "customRanking": ["asc(number)"],

@@ -1,7 +1,7 @@
 """Push a results version's events document to Firestore.
 
 The events document is what tells the results worker and the client what this
-event is: its name, dates, embargo, coalition ordering and incumbents. Getting
+event is: its name, dates, embargo, bloc ordering and incumbents. Getting
 it wrong on the night is expensive, so inspect the payload first::
 
     python manage.py push_event_to_firebase --version-slug election-night --dry-run
