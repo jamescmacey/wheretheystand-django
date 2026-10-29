@@ -36,12 +36,12 @@ from dataclasses import dataclass, field
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from wts_app.management.versions import select_version
 from wts_app.matching import geo, names
 from wts_app.models.elections import (
     ElectionCandidate,
     ElectionElectorate,
     ElectionParty,
-    ElectionResultVersion,
     ElectionVotingPlace,
 )
 
@@ -281,8 +281,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        source = self.select_version(options['source'], options['election_slug'], '--from')
-        target = self.select_version(options['target'], options['election_slug'], '--to')
+        source = select_version(options['source'], options['election_slug'], '--from')
+        target = select_version(options['target'], options['election_slug'], '--to')
 
         if source.pk == target.pk:
             raise CommandError('--from and --to are the same results version.')
@@ -315,21 +315,6 @@ class Command(BaseCommand):
         self.summarise(totals, written, options)
 
     # -- selection -------------------------------------------------------
-
-    def select_version(self, slug, election_slug, flag):
-        versions = ElectionResultVersion.objects.select_related('election').filter(slug=slug)
-        if election_slug:
-            versions = versions.filter(election__slug=election_slug)
-
-        found = list(versions)
-        if not found:
-            raise CommandError(f'{flag}: no results version has the slug {slug!r}.')
-        if len(found) > 1:
-            listed = '\n'.join(f'    {v.election.slug} / {v.slug}' for v in found)
-            raise CommandError(
-                f'{flag}: {len(found)} results versions have the slug {slug!r}. '
-                f'Narrow with --election-slug:\n{listed}')
-        return found[0]
 
     def select_copiers(self, options, source, target):
         keys = sorted(COPIERS)

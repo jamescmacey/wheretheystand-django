@@ -145,7 +145,19 @@ def publish_results(writer, version):
 
 
 def publish_voting_places(writer, version):
-    """Publish voting place reference data and per-electorate results."""
+    """Publish voting place reference data, per-electorate and per-place results.
+
+    Both shardings are written, because they answer different questions. The
+    per-electorate files are every place within one electorate; the per-place
+    files are every electorate served by one place, which is what a page about
+    a single voting place needs and cannot assemble from the other without
+    fetching every electorate.
+
+    The per-place files are the bulk of the work here: one small object per
+    voting place, several thousand at a general election. A place with nothing
+    counted is not written at all; the client reads the absence as "nothing
+    reported", which is what it means.
+    """
     prefix = _event_prefix(version)
     paths = {'reference': _write_hashed(
         writer, prefix, 'voting-places',
@@ -162,6 +174,14 @@ def publish_voting_places(writer, version):
 
     paths['by_electorate_base'] = f"{prefix}/voting-places/by-electorate/"
     paths['by_electorate_count'] = len(by_electorate)
+
+    by_place = builders.build_voting_place_results(version)
+    for number in sorted(by_place):
+        writer.write(f"{prefix}/voting-places/by-place/{number}.json",
+                     _serialise(by_place[number]), SHORT_CACHE)
+
+    paths['by_place_base'] = f"{prefix}/voting-places/by-place/"
+    paths['by_place_count'] = len(by_place)
     return paths
 
 

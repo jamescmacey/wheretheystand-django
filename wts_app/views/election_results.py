@@ -158,7 +158,13 @@ class ResultSerializer(serializers.ModelSerializer):
 
 
 class ResultsSetSerializer(serializers.ModelSerializer):
-    """A results set in the canonical cross-transport shape."""
+    """A results set in the canonical cross-transport shape.
+
+    ``firebase_id`` is on the wire for one reason: it is the Firestore document
+    id, so it is the only discriminator a published set and its live twin both
+    hold. The client keys voting place sets on it where ``result_number`` is
+    null, which is every set today. See ``ResultsSet.canonical_key``.
+    """
     key = serializers.CharField(source='canonical_key', read_only=True)
     electorate = NumberRelatedField()
     voting_place = NumberRelatedField()
@@ -174,10 +180,10 @@ class ResultsSetSerializer(serializers.ModelSerializer):
         model = ResultsSet
         fields = ['key', 'results_level', 'results_category', 'results_type',
                   'electorate', 'voting_place', 'voting_place_electorate',
-                  'result_number', 'informals', 'unknowns', 'refused',
-                  'sample_size', 'is_final', 'updated', 'updated_timestamp',
-                  'parsed', 'received', 'statistics', 'results',
-                  'transport', 'source_id']
+                  'result_number', 'firebase_id', 'informals', 'unknowns',
+                  'refused', 'sample_size', 'is_final', 'updated',
+                  'updated_timestamp', 'parsed', 'received', 'statistics',
+                  'results', 'transport', 'source_id']
 
     def get_voting_place_electorate(self, obj):
         """The electorate a voting place physically sits in.

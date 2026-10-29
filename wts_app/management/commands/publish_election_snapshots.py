@@ -41,8 +41,9 @@ class Command(BaseCommand):
         parser.add_argument(
             '--voting-places',
             action='store_true',
-            help='Also publish voting place reference data and per-electorate '
-                 'results. Several thousand objects; slow.',
+            help='Also publish voting place reference data, per-electorate '
+                 'results and one file per voting place. Several thousand '
+                 'objects; slow.',
         )
 
     def handle(self, *args, **options):
@@ -75,6 +76,9 @@ class Command(BaseCommand):
             self.stdout.write(
                 f'  {version.election.slug}/{version.slug} - {version.name}')
 
+        if options['voting_places']:
+            self._report_colliding_sets(versions)
+
         published = publisher.publish_all(
             writer,
             versions=versions,
@@ -99,3 +103,25 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f'Wrote {len(writer.written)} object(s).'))
         self.stdout.write(f'Manifest: {published["manifest"]}')
+
+    def _report_colliding_sets(self, versions):
+        """Warn about voting place sets the client would silently drop.
+
+        Two sets for the same place, electorate and category are identified
+        only by the last component of the canonical key. Where that matches as
+        well, the client holds one entry for both and keeps whichever carries
+        the later timestamp: the place reads low by the dropped set, with
+        nothing on screen to say so. Worth knowing before an event rather than
+        inferring it afterwards from a total that looks slightly off.
+        """
+        for version in versions:
+            collisions = builders.find_colliding_voting_place_sets(version)
+            if not collisions:
+                continue
+
+            self.stdout.write(self.style.WARNING(
+                f'  {version.election.slug}/{version.slug}: '
+                f'{len(collisions)} voting place key collision(s). '
+                f'Each drops a tally in the client.'))
+            for key, sets in sorted(collisions.items())[:10]:
+                self.stdout.write(f'    {key} - {len(sets)} sets')

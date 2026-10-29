@@ -255,10 +255,14 @@ import tempfile
 
 from .models.elections import (
     Election, ElectionResultVersion, ElectionElectorate, ElectionParty,
-    ElectionCandidate, ElectionVotingPlace, ResultsSet, Result, PersistentParty,
+    ElectionCandidate, ElectionVotingPlace, ElectorateIncumbent, PartyIncumbent,
+    ResultsSet, Result, PersistentParty,
     PersistentCandidate, PersistentVotingPlace,
 )
-from .snapshots import publisher
+from django.core.files.base import ContentFile
+from django.core.files.storage import FileSystemStorage
+
+from .snapshots import builders, publisher
 
 
 class SnapshotPublisherTests(TestCase):
@@ -299,6 +303,34 @@ class SnapshotPublisherTests(TestCase):
                                         updated=datetime(2023, 10, 14, 20, 0, tzinfo=nz))
         Result.objects.create(results_set=vps, candidate=ca, count=115)
 
+        # A hall in Auckland Central also issues Tamaki Makaurau's ballots, which
+        # is the ordinary case and the reason the per-place sharding exists: this
+        # set lands in electorate 2's shard, not electorate 1's.
+        cls.maori = ElectionElectorate.objects.create(
+            results_version=cls.v, number=2, name="Tamaki Makaurau")
+        away = ResultsSet.objects.create(
+            results_version=cls.v, results_level="voting_place",
+            results_category="party_votes", electorate=cls.maori, voting_place=vp,
+            firebase_id="set-away",
+            updated=datetime(2023, 10, 14, 20, 0, tzinfo=nz))
+        Result.objects.create(results_set=away, party=pa, count=40)
+
+        # Two sets for the same place, electorate and category, which is how
+        # advance and polling-day votes have been published before. They are
+        # separated only by the last component of the canonical key.
+        cls.split_one = ResultsSet.objects.create(
+            results_version=cls.v, results_level="voting_place",
+            results_category="party_votes", electorate=el, voting_place=vp,
+            firebase_id="set-advance",
+            updated=datetime(2023, 10, 14, 20, 0, tzinfo=nz))
+        Result.objects.create(results_set=cls.split_one, party=pa, count=70)
+        cls.split_two = ResultsSet.objects.create(
+            results_version=cls.v, results_level="voting_place",
+            results_category="party_votes", electorate=el, voting_place=vp,
+            firebase_id="set-polling-day",
+            updated=datetime(2023, 10, 14, 21, 0, tzinfo=nz))
+        Result.objects.create(results_set=cls.split_two, party=pa, count=45)
+
     def test_local_publish_produces_a_navigable_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -328,9 +360,81 @@ class SnapshotPublisherTests(TestCase):
             vp_payload = json.loads(by_electorate.read_text())
             self.assertEqual(vp_payload["results_sets"][0]["voting_place"], 4206)
 
+            # Everything the hall counted, for every electorate it served --
+            # which the by-electorate shards cannot answer between them without
+            # fetching all of them.
+            by_place = root / entry["paths"]["voting_places"]["by_place_base"] / "4206.json"
+            place_payload = json.loads(by_place.read_text())
+            self.assertEqual(entry["paths"]["voting_places"]["by_place_count"], 1)
+
+            sets = place_payload["results_sets"]
+            self.assertEqual({s["voting_place"] for s in sets}, {4206})
+            self.assertEqual({s["electorate"] for s in sets}, {1, 2})
+            # Where the place stands, as against whose votes these are.
+            self.assertEqual({s["voting_place_electorate"] for s in sets}, {1})
+
             reference = json.loads((root / entry["paths"]["reference"]).read_text())
             self.assertEqual(reference["candidates"][0]["party"], 5)
             self.assertEqual(reference["voting_places"], [])
+
+    def test_sets_split_across_reports_keep_separate_keys(self):
+        """Advance and polling-day votes for one place must both survive.
+
+        The client holds one entry per canonical key and keeps whichever tally
+        carries the later timestamp, so two sets sharing a key is a tally
+        dropped with nothing to show it. The last component of the key is what
+        separates them.
+        """
+        by_place = builders.build_voting_place_results(self.v)
+        sets = by_place[4206]["results_sets"]
+
+        home_party_votes = [s for s in sets
+                            if s["electorate"] == 1 and s["results_category"] == "party_votes"]
+        self.assertEqual(len(home_party_votes), 2)
+        self.assertEqual(len({s["key"] for s in home_party_votes}), 2)
+        # Together, not either one of them.
+        self.assertEqual(sum(s["results"][0]["count"] for s in home_party_votes), 115)
+
+    def test_colliding_voting_place_sets_are_reported(self):
+        """The condition under which the client silently loses a tally.
+
+        Nothing populates result_number, so the Firestore document id stands in.
+        Two sets with neither leaves them indistinguishable, which is worth a
+        warning before an event rather than a total that looks slightly low
+        during one.
+        """
+        self.assertEqual(builders.find_colliding_voting_place_sets(self.v), {})
+
+        ResultsSet.objects.filter(
+            pk__in=[self.split_one.pk, self.split_two.pk]).update(firebase_id=None)
+
+        collisions = builders.find_colliding_voting_place_sets(self.v)
+        self.assertEqual(list(collisions), ["voting_place:party_votes:1:4206:-"])
+        self.assertEqual(len(collisions["voting_place:party_votes:1:4206:-"]), 2)
+
+    def test_manifest_carries_the_card_image_url(self):
+        """The social card is published as a URL, not as a stored path.
+
+        The client only ever reads the manifest, so a path into the media
+        bucket would be no use to it.
+        """
+        field = ElectionResultVersion._meta.get_field('card_image')
+        with tempfile.TemporaryDirectory() as tmp:
+            media = FileSystemStorage(location=tmp,
+                                      base_url='https://media.example/')
+            with patch.object(field, 'storage', media):
+                self.v.card_image.save('card.png', ContentFile(b'png bytes'),
+                                       save=False)
+                entry = builders.build_version_entry(self.v, {})
+
+        self.assertEqual(
+            entry['card_image_url'],
+            f"https://media.example/elections/cards/{self.v.id}/card.png")
+
+    def test_manifest_card_image_url_is_null_without_a_card(self):
+        """Most versions never get one, and the key must still be there."""
+        entry = builders.build_version_entry(self.v, {})
+        self.assertIsNone(entry['card_image_url'])
 
     def test_manifest_is_written_last(self):
         """A failed publish must not leave the manifest pointing at nothing."""
@@ -399,7 +503,8 @@ class FirebasePushTests(TestCase):
         cls.version = ElectionResultVersion.objects.create(
             election=cls.election, name="Official count", is_primary=True,
             access_mode="firebase", is_live=True,
-            coalition_order_left=[str(cls.left.id), str(cls.right.id)],
+            bloc_order_left=[str(cls.left.id)],
+            bloc_order_right=[str(cls.right.id)],
             comparison_version_ids=[str(cls.earlier.id)])
 
     def test_event_document_carries_curated_fields(self):
@@ -411,7 +516,8 @@ class FirebasePushTests(TestCase):
         # Django spells this with a hyphen; the Firestore enum does not.
         self.assertEqual(document["election_type"], "by_election")
         # Ordered UUID lists resolve to the ids Firestore uses.
-        self.assertEqual(document["coalition_order_left"], ["pp_left", "pp_right"])
+        self.assertEqual(document["bloc_order_left"], ["pp_left"])
+        self.assertEqual(document["bloc_order_right"], ["pp_right"])
         self.assertEqual(document["comparison_events"], ["by2026_prelim"])
 
     def test_event_document_never_claims_reference_data(self):
@@ -447,10 +553,10 @@ class FirebasePushTests(TestCase):
     def test_unknown_ids_in_ordered_lists_are_rejected(self):
         from django.core.exceptions import ValidationError
 
-        self.version.coalition_order_right = ["4b1f4c3e-0000-0000-0000-000000000000"]
+        self.version.bloc_order_right = ["4b1f4c3e-0000-0000-0000-000000000000"]
         with self.assertRaises(ValidationError) as caught:
             self.version.clean()
-        self.assertIn("coalition_order_right", caught.exception.message_dict)
+        self.assertIn("bloc_order_right", caught.exception.message_dict)
 
 
 class ServiceUpdateTests(TestCase):
@@ -1438,3 +1544,421 @@ class PublishGateTests(TestCase):
                     ElectionResultVersion.objects.create(
                         election=election, name="Election night")
         queued.assert_called()
+
+
+class IncumbencyFixture(TestCase):
+    """Shared setup: one election with two versions and three seats.
+
+    Three electorates, chosen to cover the three cases the client has to tell
+    apart -- a member standing again, a party standing somebody else, and a
+    member who left their party -- plus the seat counts that go with them.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from .models.electorates import Electorate
+
+        nz = dt_timezone(timedelta(hours=13))
+        cls.election = Election.objects.create(
+            name="2026 General Election", polling_date=date(2026, 10, 17),
+            polls_close=datetime(2026, 10, 17, 19, 0, tzinfo=nz))
+        cls.source = ElectionResultVersion.objects.create(
+            election=cls.election, name="Election night", is_primary=True,
+            firebase_id="ge2026_night")
+        cls.target = ElectionResultVersion.objects.create(
+            election=cls.election, name="Official count",
+            firebase_id="ge2026_official")
+
+        cls.blue = PersistentParty.objects.create(
+            display_name="Blue Party", abbreviation="BLU", firebase_id="pp_blue")
+        cls.red = PersistentParty.objects.create(
+            display_name="Red Party", abbreviation="RED", firebase_id="pp_red")
+
+        cls.ilam = Electorate.objects.create(
+            name="Ilam", region="Canterbury", valid_from=date(2020, 1, 1))
+        cls.epsom = Electorate.objects.create(
+            name="Epsom", region="Auckland", valid_from=date(2020, 1, 1))
+        cls.rongotai = Electorate.objects.create(
+            name="Rongotai", region="Wellington", valid_from=date(2020, 1, 1))
+
+        cls.sitting = PersistentCandidate.objects.create(display_name="HOLD, Hannah")
+        cls.retiring = PersistentCandidate.objects.create(display_name="GOING, Gerald")
+        cls.defector = PersistentCandidate.objects.create(display_name="CROSS, Carla")
+
+        # Standing again for the party that won the seat.
+        cls.held = ElectorateIncumbent.objects.create(
+            results_version=cls.source, electorate=cls.ilam,
+            persistent_candidate=cls.sitting, persistent_party=cls.blue)
+        # Won for Blue, now sits for Red.
+        cls.moved = ElectorateIncumbent.objects.create(
+            results_version=cls.source, electorate=cls.epsom,
+            persistent_candidate=cls.defector, persistent_party=cls.blue,
+            has_left_party=True, current_persistent_party=cls.red)
+        # Red-held; the member is standing down, so Red stands somebody else.
+        cls.standing_down = ElectorateIncumbent.objects.create(
+            results_version=cls.source, electorate=cls.rongotai,
+            persistent_candidate=cls.retiring, persistent_party=cls.red)
+
+        cls.blue_seats = PartyIncumbent.objects.create(
+            results_version=cls.source, persistent_party=cls.blue,
+            electorate_seats=1, list_seats=4)
+        # Deliberately a different total from Blue's five, so the manifest's
+        # ordering by seats held is tested rather than a tie-break on id.
+        cls.red_seats = PartyIncumbent.objects.create(
+            results_version=cls.source, persistent_party=cls.red,
+            electorate_seats=2, list_seats=4)
+
+    @staticmethod
+    def publish(version=None):
+        """Publish locally and return the parsed manifest.
+
+        ``record=False`` so a test does not leave published paths behind; the
+        versions written on this run are still described, because publish_all
+        passes their fresh paths through.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            writer = publisher.LocalWriter(root)
+            publisher.publish_all(
+                writer, versions=[version] if version else None, record=False)
+            return json.loads((root / "manifest.json").read_text())
+
+
+class IncumbencyModelTests(IncumbencyFixture):
+    """What the two tables will and will not accept."""
+
+    def test_one_incumbent_per_electorate_per_version(self):
+        from django.db import IntegrityError
+
+        with self.assertRaises(IntegrityError):
+            ElectorateIncumbent.objects.create(
+                results_version=self.source, electorate=self.ilam,
+                persistent_party=self.red)
+
+    def test_the_same_electorate_can_be_held_in_two_versions(self):
+        """Incumbency is per version, so copying forward must not collide."""
+        ElectorateIncumbent.objects.create(
+            results_version=self.target, electorate=self.ilam,
+            persistent_candidate=self.sitting, persistent_party=self.blue)
+        self.assertEqual(
+            ElectorateIncumbent.objects.filter(electorate=self.ilam).count(), 2)
+
+    def test_total_seats_adds_the_two_counts(self):
+        self.assertEqual(self.blue_seats.total_seats, 5)
+        self.assertEqual(self.red_seats.total_seats, 6)
+
+    def test_one_party_incumbent_per_party_per_version(self):
+        from django.db import IntegrityError
+
+        with self.assertRaises(IntegrityError):
+            PartyIncumbent.objects.create(
+                results_version=self.source, persistent_party=self.blue,
+                electorate_seats=9)
+
+    def test_sitting_party_follows_a_defection(self):
+        """Seat counts go by where a member sits now, not what they were elected for."""
+        self.assertEqual(self.held.sitting_persistent_party_id, self.blue.id)
+        self.assertEqual(self.moved.sitting_persistent_party_id, self.red.id)
+
+    def test_a_member_who_left_for_no_party_sits_as_an_independent(self):
+        independent = ElectorateIncumbent(
+            results_version=self.target, electorate=self.ilam,
+            persistent_candidate=self.sitting, persistent_party=self.blue,
+            has_left_party=True)
+        independent.full_clean()
+        self.assertIsNone(independent.sitting_persistent_party_id)
+
+    def test_a_defection_to_the_same_party_is_rejected(self):
+        from django.core.exceptions import ValidationError
+
+        incumbent = ElectorateIncumbent(
+            results_version=self.target, electorate=self.ilam,
+            persistent_party=self.blue, has_left_party=True,
+            current_persistent_party=self.blue)
+        with self.assertRaises(ValidationError) as caught:
+            incumbent.clean()
+        self.assertIn("current_persistent_party", caught.exception.message_dict)
+
+    def test_a_current_party_without_a_defection_is_rejected(self):
+        from django.core.exceptions import ValidationError
+
+        incumbent = ElectorateIncumbent(
+            results_version=self.target, electorate=self.ilam,
+            persistent_party=self.blue, current_persistent_party=self.red)
+        with self.assertRaises(ValidationError) as caught:
+            incumbent.clean()
+        self.assertIn("has_left_party", caught.exception.message_dict)
+
+    def test_a_party_cannot_sit_in_both_blocs(self):
+        from django.core.exceptions import ValidationError
+
+        self.source.bloc_order_left = [str(self.blue.id)]
+        self.source.bloc_order_right = [str(self.blue.id)]
+        with self.assertRaises(ValidationError) as caught:
+            self.source.clean()
+        self.assertIn("bloc_order_right", caught.exception.message_dict)
+
+
+class IncumbencyManifestTests(IncumbencyFixture):
+    """Incumbency and blocs ride in the manifest rather than in a payload.
+
+    They are curated descriptions of an event, not results, so they must reach
+    a client on a save with nothing published. The manifest is also the one
+    object every visitor fetches, so what is *not* written matters as much.
+    """
+
+    def entry(self, manifest, slug):
+        versions = manifest["elections"][0]["results_versions"]
+        return next(v for v in versions if v["slug"] == slug)
+
+    def test_manifest_carries_incumbents_as_persistent_ids(self):
+        entry = self.entry(self.publish(), "election-night")
+        electorates = entry["incumbency"]["electorates"]
+
+        # Alphabetical by electorate, so the file is readable and stable.
+        self.assertEqual([row["electorate"] for row in electorates],
+                         [str(self.epsom.id), str(self.ilam.id),
+                          str(self.rongotai.id)])
+        ilam = next(row for row in electorates
+                    if row["electorate"] == str(self.ilam.id))
+        self.assertEqual(ilam["candidate"], str(self.sitting.id))
+        self.assertEqual(ilam["party"], str(self.blue.id))
+
+    def test_manifest_names_persistent_objects_rather_than_repeating_them(self):
+        """The client already holds every persistent object."""
+        ilam = next(row for row in
+                    self.entry(self.publish(), "election-night")["incumbency"]["electorates"]
+                    if row["electorate"] == str(self.ilam.id))
+        self.assertEqual(set(ilam), {"electorate", "candidate", "party"})
+        self.assertNotIn("Ilam", json.dumps(ilam))
+
+    def test_manifest_carries_party_seats_to_compare_against(self):
+        parties = self.entry(self.publish(), "election-night")["incumbency"]["parties"]
+        # Red leads on six seats held to Blue's five.
+        self.assertEqual(parties, [
+            {"party": str(self.red.id), "electorate_seats": 2, "list_seats": 4},
+            {"party": str(self.blue.id), "electorate_seats": 1, "list_seats": 4},
+        ])
+
+    def test_manifest_carries_a_defection(self):
+        epsom = next(row for row in
+                     self.entry(self.publish(), "election-night")["incumbency"]["electorates"]
+                     if row["electorate"] == str(self.epsom.id))
+        self.assertTrue(epsom["left_party"])
+        self.assertEqual(epsom["party"], str(self.blue.id))
+        self.assertEqual(epsom["current_party"], str(self.red.id))
+
+    def test_a_vacant_seat_names_no_candidate(self):
+        self.held.persistent_candidate = None
+        self.held.save()
+        ilam = next(row for row in
+                    self.entry(self.publish(), "election-night")["incumbency"]["electorates"]
+                    if row["electorate"] == str(self.ilam.id))
+        self.assertNotIn("candidate", ilam)
+
+    def test_false_members_are_left_out(self):
+        """Nothing every visitor fetches should carry a field saying nothing."""
+        ilam = next(row for row in
+                    self.entry(self.publish(), "election-night")["incumbency"]["electorates"]
+                    if row["electorate"] == str(self.ilam.id))
+        self.assertNotIn("left_party", ilam)
+        self.assertNotIn("current_party", ilam)
+
+    def test_manifest_omits_incumbency_where_none_is_curated(self):
+        entry = self.entry(self.publish(), "official-count")
+        self.assertNotIn("incumbency", entry)
+        self.assertNotIn("blocs", entry)
+
+    def test_manifest_carries_the_bloc_order(self):
+        self.source.bloc_order_left = [str(self.red.id)]
+        self.source.bloc_order_right = [str(self.blue.id)]
+        self.source.save()
+
+        entry = self.entry(self.publish(), "election-night")
+        self.assertEqual(entry["blocs"],
+                         {"left": [str(self.red.id)], "right": [str(self.blue.id)]})
+
+    def test_one_curated_bloc_is_enough_to_publish_the_key(self):
+        self.source.bloc_order_left = [str(self.red.id)]
+        self.source.save()
+        entry = self.entry(self.publish(), "election-night")
+        self.assertEqual(entry["blocs"], {"left": [str(self.red.id)], "right": []})
+
+    def test_a_new_incumbent_reaches_the_manifest_without_republishing_payloads(self):
+        """The point of carrying this in the manifest rather than a payload."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            # Publish properly first, so both versions have recorded paths and
+            # so appear in a manifest rebuilt from them.
+            publisher.publish_all(publisher.LocalWriter(root))
+
+            ElectorateIncumbent.objects.create(
+                results_version=self.target, electorate=self.ilam,
+                persistent_candidate=self.sitting, persistent_party=self.blue)
+
+            writer = publisher.LocalWriter(root)
+            publisher.publish_manifest_only(writer)
+            # Nothing else was rewritten: no payload changed, and none had to.
+            self.assertEqual(writer.written, ["manifest.json"])
+
+            manifest = json.loads((root / "manifest.json").read_text())
+
+        entry = self.entry(manifest, "official-count")
+        self.assertEqual(entry["incumbency"]["electorates"],
+                         [{"electorate": str(self.ilam.id),
+                           "candidate": str(self.sitting.id),
+                           "party": str(self.blue.id)}])
+
+    def test_building_the_manifest_does_not_query_per_version(self):
+        """Guards the prefetch: this runs on every save of a version.
+
+        One query for the versions and one for each kind of incumbency, however
+        many versions there are. Without the prefetch it would be two more per
+        version, on a rebuild that happens on every save.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            # A DryRunWriter never records paths, and a version with none is
+            # left out of the manifest -- which would make this pass trivially.
+            publisher.publish_all(publisher.LocalWriter(pathlib.Path(tmp)))
+
+            with self.assertNumQueries(3):
+                entries = publisher.build_manifest_entries()
+            self.assertEqual(sum(len(v) for v in entries.values()), 2)
+
+            third = ElectionResultVersion.objects.create(
+                election=self.election, name="Recount",
+                firebase_id="ge2026_recount")
+            ElectorateIncumbent.objects.create(
+                results_version=third, electorate=self.ilam,
+                persistent_candidate=self.sitting, persistent_party=self.blue)
+            PartyIncumbent.objects.create(
+                results_version=third, persistent_party=self.blue,
+                electorate_seats=1)
+            publisher.publish_all(
+                publisher.LocalWriter(pathlib.Path(tmp)), versions=[third])
+
+            # A third published version, carrying incumbency of its own, and
+            # still three queries.
+            with self.assertNumQueries(3):
+                entries = publisher.build_manifest_entries()
+            self.assertEqual(sum(len(v) for v in entries.values()), 3)
+
+
+class CopyIncumbentsTests(IncumbencyFixture):
+    """Moving curation to a duplicate version rather than entering it twice."""
+
+    def run_command(self, *args):
+        from django.core.management import call_command
+        from io import StringIO
+
+        out = StringIO()
+        call_command('copy_incumbents', '--from', 'election-night',
+                     '--to', 'official-count', *args, stdout=out)
+        return out.getvalue()
+
+    def target_electorates(self):
+        return set(ElectorateIncumbent.objects.filter(
+            results_version=self.target).values_list('electorate_id', flat=True))
+
+    def test_dry_run_reports_and_writes_nothing(self):
+        output = self.run_command()
+        self.assertIn("Nothing was changed", output)
+        self.assertIn("3", output)
+        self.assertEqual(self.target_electorates(), set())
+
+    def test_apply_copies_both_kinds(self):
+        self.run_command('--apply')
+        self.assertEqual(
+            self.target_electorates(),
+            {self.ilam.id, self.epsom.id, self.rongotai.id})
+        self.assertEqual(
+            PartyIncumbent.objects.filter(results_version=self.target).count(), 2)
+
+    def test_a_defection_travels_with_the_row(self):
+        self.run_command('--apply')
+        copied = ElectorateIncumbent.objects.get(
+            results_version=self.target, electorate=self.epsom)
+        self.assertTrue(copied.has_left_party)
+        self.assertEqual(copied.current_persistent_party_id, self.red.id)
+
+    def test_seat_counts_travel_with_the_row(self):
+        self.run_command('--apply')
+        copied = PartyIncumbent.objects.get(
+            results_version=self.target, persistent_party=self.blue)
+        self.assertEqual((copied.electorate_seats, copied.list_seats), (1, 4))
+
+    def test_running_twice_changes_nothing(self):
+        self.run_command('--apply')
+        output = self.run_command('--apply')
+        self.assertIn("already the same", output)
+        self.assertEqual(
+            ElectorateIncumbent.objects.filter(results_version=self.target).count(), 3)
+
+    def test_a_differing_row_needs_overwrite(self):
+        ElectorateIncumbent.objects.create(
+            results_version=self.target, electorate=self.ilam,
+            persistent_candidate=self.retiring, persistent_party=self.red)
+
+        output = self.run_command('--apply')
+        self.assertIn("already curated differently", output)
+        kept = ElectorateIncumbent.objects.get(
+            results_version=self.target, electorate=self.ilam)
+        self.assertEqual(kept.persistent_party_id, self.red.id)
+
+        self.run_command('--apply', '--overwrite')
+        replaced = ElectorateIncumbent.objects.get(
+            results_version=self.target, electorate=self.ilam)
+        self.assertEqual(replaced.persistent_party_id, self.blue.id)
+        self.assertEqual(replaced.persistent_candidate_id, self.sitting.id)
+
+    def test_only_narrows_what_is_copied(self):
+        self.run_command('--apply', '--only', 'parties')
+        self.assertEqual(self.target_electorates(), set())
+        self.assertEqual(
+            PartyIncumbent.objects.filter(results_version=self.target).count(), 2)
+
+    def test_an_unknown_only_is_refused(self):
+        from django.core.management.base import CommandError
+
+        with self.assertRaises(CommandError):
+            self.run_command('--only', 'voting-places')
+
+    def test_the_same_version_is_refused(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from io import StringIO
+
+        with self.assertRaises(CommandError):
+            call_command('copy_incumbents', '--from', 'election-night',
+                         '--to', 'election-night', stdout=StringIO())
+
+    def test_different_elections_are_refused(self):
+        """A version's incumbents are the previous election's winners."""
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from io import StringIO
+
+        nz = dt_timezone(timedelta(hours=13))
+        other = Election.objects.create(
+            name="2023 General Election", polling_date=date(2023, 10, 14),
+            polls_close=datetime(2023, 10, 14, 19, 0, tzinfo=nz))
+        ElectionResultVersion.objects.create(
+            election=other, name="Final", firebase_id="ge2023_final")
+
+        with self.assertRaises(CommandError) as caught:
+            call_command('copy_incumbents', '--from', 'election-night',
+                         '--to', 'final', stdout=StringIO())
+        self.assertIn("out of date", str(caught.exception))
+
+    def test_a_seat_count_disagreement_is_reported(self):
+        """Blue holds one electorate; saying it holds three should be noticed."""
+        self.blue_seats.electorate_seats = 3
+        self.blue_seats.save()
+
+        output = self.run_command('--apply')
+        self.assertIn("curated 3, counted 1", output)
+
+    def test_counts_that_agree_are_not_reported(self):
+        """Red won two seats but one member crossed to it, so two is right."""
+        output = self.run_command('--apply')
+        self.assertNotIn("counted", output)

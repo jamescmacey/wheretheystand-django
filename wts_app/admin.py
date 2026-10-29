@@ -6,6 +6,8 @@ from django.contrib.auth.admin import UserAdmin
 from wts_app.models import User
 from wts_app.models.elections import (
     ElectionResultVersion,
+    ElectorateIncumbent,
+    PartyIncumbent,
     PersistentCandidate,
     PersistentParty,
 )
@@ -42,6 +44,19 @@ def _queue(request, task, *args, description=""):
     return True
 
 
+class PartyIncumbentInline(admin.TabularInline):
+    """Seats each party is defending, edited with the version they belong to.
+
+    About twenty rows for a general election, and meaningless apart from the
+    version, so they belong on its form. The electorate incumbents do not: at
+    seventy-two rows they get a changelist of their own.
+    """
+
+    model = PartyIncumbent
+    extra = 0
+    raw_id_fields = ("persistent_party",)
+
+
 @admin.register(ElectionResultVersion)
 class ElectionResultVersionAdmin(admin.ModelAdmin):
     list_display = ("name", "election", "is_primary", "access_mode", "is_live",
@@ -51,6 +66,43 @@ class ElectionResultVersionAdmin(admin.ModelAdmin):
     readonly_fields = ("refdata_built", "snapshot_paths",
                        "last_firebase_push_at", "last_snapshot_published_at")
     actions = ("push_to_firestore", "publish_snapshots", "publish_manifest")
+    inlines = (PartyIncumbentInline,)
+
+    # Grouped because the curated fields are the ones a person actually fills
+    # in, and the two bloc lists are raw JSON textareas that need the ordering
+    # rule stated next to them.
+    fieldsets = (
+        (None, {
+            "fields": ("election", "name", "slug", "description", "is_primary"),
+        }),
+        ("Transport", {
+            "fields": ("access_mode", "firebase_id", "is_live", "is_final",
+                       "refdata_built", "archived", "archived_url"),
+        }),
+        ("Timing", {
+            "fields": ("embargo_start", "embargo_end", "result_targets"),
+        }),
+        ("Blocs", {
+            "description": (
+                "Ordered lists of persistent party UUIDs. The left bloc, then "
+                "every party in neither list, then the right bloc, is the "
+                "seating order from the far left of the chamber to the far "
+                "right &mdash; so write the left bloc far-left first and the "
+                "right bloc centre first. A party in neither list is "
+                "cross-bench and sits in the middle."),
+            "fields": ("bloc_order_left", "bloc_order_right"),
+        }),
+        ("Comparison", {
+            "fields": ("comparison_version_ids",),
+        }),
+        ("Presentation", {
+            "fields": ("card_image", "card_url", "vp_finder_url"),
+        }),
+        ("Published", {
+            "fields": ("snapshot_paths", "vp_numbering_scheme",
+                       "last_firebase_push_at", "last_snapshot_published_at"),
+        }),
+    )
 
     @admin.action(description="Push events document to Firestore")
     def push_to_firestore(self, request, queryset):
@@ -129,6 +181,49 @@ class PersistentCandidateAdmin(admin.ModelAdmin):
         _queue(request, push_persistent, ["persistent_candidates"], ids,
                description=f"Queued a Firestore push of {len(ids)} candidate"
                            f"{'' if len(ids) == 1 else 's'}.")
+
+
+@admin.register(ElectorateIncumbent)
+class ElectorateIncumbentAdmin(admin.ModelAdmin):
+    """Who held each electorate going into a results version.
+
+    Filtered by version, because that is the only way to work through them:
+    seventy-two rows per general election, curated once and then copied forward
+    with `copy_incumbents`.
+
+    raw_id_fields rather than autocomplete_fields throughout: Electorate is
+    registered by the catch-all loop below with no search_fields, so an
+    autocomplete on it would fail at runtime rather than at import.
+    """
+
+    list_display = ("electorate", "persistent_candidate", "persistent_party",
+                    "has_left_party", "current_persistent_party",
+                    "results_version")
+    list_filter = ("results_version", "has_left_party")
+    search_fields = ("electorate__name", "persistent_candidate__display_name",
+                     "persistent_party__display_name")
+    raw_id_fields = ("electorate", "persistent_candidate", "persistent_party",
+                     "current_persistent_party")
+    list_select_related = ("electorate", "persistent_candidate",
+                           "persistent_party", "current_persistent_party",
+                           "results_version")
+
+
+@admin.register(PartyIncumbent)
+class PartyIncumbentAdmin(admin.ModelAdmin):
+    """Also editable inline on the results version; this is for bulk edits."""
+
+    list_display = ("persistent_party", "electorate_seats", "list_seats",
+                    "total_seats", "results_version")
+    list_filter = ("results_version",)
+    search_fields = ("persistent_party__display_name",
+                     "persistent_party__abbreviation")
+    raw_id_fields = ("persistent_party",)
+    list_select_related = ("persistent_party", "results_version")
+
+    @admin.display(description="Total")
+    def total_seats(self, obj):
+        return obj.total_seats
 
 
 app = apps.get_app_config('wts_app')
