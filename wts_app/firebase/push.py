@@ -29,7 +29,6 @@ from ..models.elections import (
     PersistentParty,
     PersistentVotingPlace,
 )
-from ..models.electorates import Electorate
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +198,57 @@ def build_persistent_candidate_document(candidate):
     }
 
 
+def _boundary_shape_document(shape):
+    """A boundary geometry file: where to fetch it, and who to credit.
+
+    The GeoJSON itself never goes to Firestore: a full shape can run past the
+    one-megabyte document limit on its own, and a page draws one of them.
+    """
+    if shape is None:
+        return None
+    return {
+        'id': str(shape.id),
+        'url': shape.file.url if shape.file else None,
+        'copyright_owner':
+            shape.copyright_owner.name if shape.copyright_owner_id else None,
+        'licence': shape.licence.name if shape.licence_id else None,
+        'licence_grantor':
+            shape.licence_grantor.name if shape.licence_grantor_id else None,
+    }
+
+
+def build_persistent_electorate_boundaries(electorate):
+    """Every boundary set the electorate has had, newest `valid_from` first.
+
+    Nested on the electorate rather than given a collection of its own. A
+    collection would be another per-visitor read on the pages that draw a map,
+    for a handful of maps that change with a Representation Commission rather
+    than with a count -- and reference data is already what dominates the
+    Firestore bill.
+
+    Field for field the published payload's `boundaries`, deliberately, so the
+    two copies of this cannot drift and one client path reads either. That makes
+    `valid_from` an ISO date string rather than a Firestore timestamp: it is
+    compared against other dates, never arithmetic.
+
+    Ordering comes from the queryset, so callers pass one that has it.
+
+    The write merges per field, and this is one field holding an array, so each
+    push replaces the whole list: a set deleted in Django goes with it.
+    """
+    return [
+        {
+            'id': str(boundary.id),
+            'boundary_set': str(boundary.boundary_set_id),
+            'valid_from': boundary.boundary_set.valid_from.isoformat(),
+            'shape': _boundary_shape_document(boundary.shape),
+            'simplified_shape':
+                _boundary_shape_document(boundary.simplified_shape),
+        }
+        for boundary in electorate.electorateboundary_set.all()
+    ]
+
+
 def build_persistent_electorate_document(electorate):
     return {
         'name': electorate.name,
@@ -209,6 +259,9 @@ def build_persistent_electorate_document(electorate):
         # The Commission's cross-election number. Kept for reference; the
         # document id is the Django UUID.
         'legacy_id': electorate.legacy_id,
+        # An electorate survives across elections; its lines do not. Each set
+        # carries the date it came into force, and the client picks.
+        'boundaries': build_persistent_electorate_boundaries(electorate),
     }
 
 
@@ -461,11 +514,17 @@ def push_persistent_electorates(ids=None, *, dry_run=False):
     `legacy_id` is still carried as a field, because it is the Electoral
     Commission's own cross-election number and worth keeping — it is simply no
     longer an identifier anything resolves by.
+
+    The queryset is the published payload's, so each document's `boundaries`
+    arrive in the same order as the published copy's and cost one query for all
+    of them rather than one per electorate.
     """
+    from ..views.election_results import persistent_electorate_queryset
+
     if not dry_run:
         _require_enabled()
 
-    queryset = Electorate.objects.all()
+    queryset = persistent_electorate_queryset()
     if ids is not None:
         queryset = queryset.filter(id__in=ids)
 
