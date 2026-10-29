@@ -22,7 +22,6 @@ from ..models.elections import (
     Result,
     ResultsSet,
 )
-from ..models.electorates import Electorate
 from ..views.election_results import (
     ElectionCandidateSerializer,
     ElectionElectorateSerializer,
@@ -33,6 +32,7 @@ from ..views.election_results import (
     PersistentPartySerializer,
     PersistentVotingPlaceSerializer,
     ResultsSetSerializer,
+    persistent_electorate_queryset,
 )
 
 from django.db.models import F, Prefetch
@@ -60,10 +60,14 @@ def build_persistent():
     Party colours and the links from candidates to people live here. They are
     what let the results pages join back into the rest of the site, and they are
     curated in Django rather than derived from the Electoral Commission feed.
+
+    Electorates carry their boundaries, newest set first. Only the URL of each
+    shape file travels; the geometry stays on media and is fetched for the one
+    boundary a page draws.
     """
     return {
         'persistent_electorates': PersistentElectorateSerializer(
-            Electorate.objects.all(), many=True).data,
+            persistent_electorate_queryset(), many=True).data,
         'persistent_parties': PersistentPartySerializer(
             PersistentParty.objects.all(), many=True).data,
         'persistent_candidates': PersistentCandidateSerializer(
