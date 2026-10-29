@@ -479,6 +479,176 @@ class SnapshotPublisherTests(TestCase):
         self.assertFalse(published[key]["persistent"].startswith("events/"))
 
 
+class PersistentBoundaryPayloadTests(TestCase):
+    """Boundaries ride with the electorate in the persistent payload.
+
+    An electorate survives across elections; the lines on its map do not. So the
+    payload carries every boundary set the electorate has had, each stamped with
+    the set's ``valid_from``, and the client decides which one a page draws --
+    tonight's from the newest set, a 2014 page from the set in force then. It has
+    to come from here: on the night Django is deliberately not in the request
+    path, so a map that needed an API call would have nothing to draw.
+
+    Only the URL of each shape travels. The GeoJSON stays on media and is fetched
+    for the one boundary a page actually renders.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from .models import Electorate, ElectorateBoundary, ElectorateBoundarySet
+        from .models.documents import CopyrightParty, Document, File, Licence
+
+        field = File._meta.get_field('file')
+        tmp = cls.enterClassContext(tempfile.TemporaryDirectory())
+        cls.enterClassContext(patch.object(
+            field, 'storage',
+            FileSystemStorage(location=tmp, base_url='https://media.test/')))
+
+        # Saving an electorate queues a site search update, which would reach a
+        # broker. Nothing here depends on the index.
+        cls.electorate = Electorate(
+            name="Ilam", slug="ilam", region="Canterbury", legacy_id=17,
+            valid_from=date(2014, 1, 1))
+        cls.electorate.save(update_site_search=False)
+
+        linz = CopyrightParty.objects.create(
+            name="Land Information New Zealand")
+        stats = CopyrightParty.objects.create(name="Stats NZ")
+        licence = Licence.objects.create(name="CC BY 4.0")
+        document = Document.objects.create(name="2026 electorate boundaries")
+
+        def shape(name, credited=True):
+            shape_file = File(
+                document=document, file_name=name,
+                file_type="application/geo+json",
+                copyright_owner=linz if credited else None,
+                licence=licence if credited else None,
+                licence_grantor=stats if credited else None)
+            shape_file.file.save(
+                name, ContentFile(b'{"type":"FeatureCollection","features":[]}'),
+                save=False)
+            shape_file.save()
+            return shape_file
+
+        cls.current_set = ElectorateBoundarySet.objects.create(
+            document=document, valid_from=date(2026, 1, 1))
+        cls.current = ElectorateBoundary.objects.create(
+            electorate=cls.electorate, boundary_set=cls.current_set,
+            shape=shape("ilam-2026.geojson"),
+            simplified_shape=shape("ilam-2026-simplified.geojson"))
+
+        # The older set is the awkward one: no simplified shape, and a file
+        # nobody has credited yet.
+        cls.former_set = ElectorateBoundarySet.objects.create(
+            document=document, valid_from=date(2014, 1, 1))
+        cls.former = ElectorateBoundary.objects.create(
+            electorate=cls.electorate, boundary_set=cls.former_set,
+            shape=shape("ilam-2014.geojson", credited=False))
+
+    def _electorate(self):
+        electorate, = builders.build_persistent()['persistent_electorates']
+        return electorate
+
+    def test_every_boundary_set_is_published_newest_first(self):
+        """Ordering is the contract: the head of the list is the current shape."""
+        boundaries = self._electorate()['boundaries']
+        self.assertEqual([b['valid_from'] for b in boundaries],
+                         ['2026-01-01', '2014-01-01'])
+        self.assertEqual([b['boundary_set'] for b in boundaries],
+                         [self.current_set.id, self.former_set.id])
+
+    def test_a_shape_is_a_url_and_an_attribution_and_nothing_else(self):
+        """Lean on purpose: this payload is inlined into every rendered page.
+
+        It is also the whole licence story. A map drawn from a published shape
+        has to credit it, and the credit cannot be a second request.
+        """
+        shape = self._electorate()['boundaries'][0]['shape']
+        self.assertEqual(
+            set(shape),
+            {'id', 'url', 'copyright_owner', 'licence', 'licence_grantor'})
+        self.assertTrue(shape['url'].startswith('https://media.test/'))
+        self.assertEqual(shape['copyright_owner'],
+                         "Land Information New Zealand")
+        self.assertEqual(shape['licence'], "CC BY 4.0")
+        self.assertEqual(shape['licence_grantor'], "Stats NZ")
+
+    def test_the_simplified_shape_is_offered_but_never_assumed(self):
+        """Clients prefer it and fall back to the full geometry."""
+        current, former = self._electorate()['boundaries']
+        self.assertTrue(
+            current['simplified_shape']['url'].endswith('-simplified.geojson'))
+        self.assertIsNone(former['simplified_shape'])
+
+    def test_an_uncredited_shape_publishes_with_null_attribution(self):
+        """Those three foreign keys are all nullable, and most files use them."""
+        shape = self._electorate()['boundaries'][1]['shape']
+        self.assertIsNone(shape['copyright_owner'])
+        self.assertIsNone(shape['licence'])
+        self.assertIsNone(shape['licence_grantor'])
+
+    def test_boundaries_cost_one_query_for_all_of_them(self):
+        """One per collection in the payload, and one for the boundaries.
+
+        Serialised without the prefetch this is a query per electorate for the
+        set, and two more per boundary for the shapes and their attribution --
+        several hundred over a general election.
+        """
+        with self.assertNumQueries(5):
+            builders.build_persistent()
+
+    def test_the_payload_carries_no_geometry(self):
+        """The shapes are megabytes. Only their URLs belong in here."""
+        body = publisher._serialise(builders.build_persistent())
+        self.assertNotIn(b'FeatureCollection', body)
+
+    def _pushed_electorate(self):
+        """The Firestore document, with the write itself intercepted."""
+        from .firebase import push
+
+        writes = []
+
+        def record(db, collection, document_id, payload, dry_run):
+            writes.append((collection, str(document_id), payload))
+            return document_id
+
+        with patch.object(push, "get_firestore_client", lambda: object()), \
+                patch.object(push, "_write", record):
+            push.push_persistent_electorates()
+
+        (collection, document_id, payload), = writes
+        self.assertEqual((collection, document_id),
+                         ("persistent_electorates", str(self.electorate.id)))
+        return payload
+
+    @override_settings(FIREBASE_PUSH_ENABLED=True)
+    def test_the_firestore_copy_is_the_published_copy(self):
+        """Two copies of the same thing, and they must not drift.
+
+        Published reference data is what a client reads once it exists, and the
+        Firestore documents are what it reads until then. A map that appeared
+        only after publishing would be a gap nobody would notice until a night
+        when publishing had not happened yet.
+        """
+        published = json.loads(publisher._serialise(builders.build_persistent()))
+        electorate, = published['persistent_electorates']
+
+        self.assertEqual(self._pushed_electorate()['boundaries'],
+                         electorate['boundaries'])
+
+    @override_settings(FIREBASE_PUSH_ENABLED=True)
+    def test_the_pushed_document_stores_only_plain_types(self):
+        """A UUID or a date object here fails at the write, not at the build."""
+        document = self._pushed_electorate()
+        self.assertEqual(json.loads(json.dumps(document)), document)
+
+    @override_settings(FIREBASE_PUSH_ENABLED=True)
+    def test_pushing_boundaries_is_not_a_query_per_electorate(self):
+        """One query for the electorates, one for every boundary they have."""
+        with self.assertNumQueries(2):
+            self._pushed_electorate()
+
+
 class FirebasePushTests(TestCase):
     """What Django sends outward to Firestore.
 

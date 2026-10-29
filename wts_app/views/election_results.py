@@ -20,7 +20,8 @@ from ..models.elections import (
     ResultsSet,
     Result,
 )
-from ..models.electorates import Electorate
+from ..models.documents import File
+from ..models.electorates import Electorate, ElectorateBoundary
 from ..models.people import Person
 from .electorates import ElectorateSerializer, ElectorateBoundarySetSerializer
 from .elections import ElectionSerializer, ElectionResultVersionSerializer
@@ -88,18 +89,100 @@ class PersistentVotingPlaceSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class PersistentBoundaryShapeSerializer(serializers.ModelSerializer):
+    """A boundary geometry file: where to fetch it, and who to credit.
+
+    Lean on purpose. The general FileSerializer renders every copyright and
+    licence field in full, once per shape, per electorate, per boundary set, into
+    a payload that is inlined into every server-rendered election page. The
+    geometry itself is never inlined: this is a URL the client fetches only for
+    the boundary it decides to draw.
+    """
+
+    url = serializers.FileField(source='file', read_only=True)
+    copyright_owner = serializers.CharField(
+        source='copyright_owner.name', read_only=True, default=None)
+    licence = serializers.CharField(
+        source='licence.name', read_only=True, default=None)
+    licence_grantor = serializers.CharField(
+        source='licence_grantor.name', read_only=True, default=None)
+
+    class Meta:
+        model = File
+        fields = ['id', 'url', 'copyright_owner', 'licence', 'licence_grantor']
+
+
+class PersistentElectorateBoundarySerializer(serializers.ModelSerializer):
+    """One electorate's shape under one boundary set.
+
+    ``valid_from`` belongs to the set, and is lifted onto the boundary because it
+    is the whole basis for choosing between an electorate's shapes: a client
+    picks the newest set that was in force for the election it is rendering.
+    Carrying it here means it does not also have to hold the sets themselves.
+    """
+
+    boundary_set = serializers.PrimaryKeyRelatedField(read_only=True)
+    valid_from = serializers.DateField(
+        source='boundary_set.valid_from', read_only=True)
+    shape = PersistentBoundaryShapeSerializer(read_only=True)
+    simplified_shape = PersistentBoundaryShapeSerializer(read_only=True)
+
+    class Meta:
+        model = ElectorateBoundary
+        fields = ['id', 'boundary_set', 'valid_from', 'shape',
+                  'simplified_shape']
+
+
 class PersistentElectorateSerializer(serializers.ModelSerializer):
     """A lean electorate for the persistent data payload.
 
     The general ElectorateSerializer nests the electorates this one replaced and
     was replaced by, which is dead weight in a payload that already carries every
     electorate and is inlined into the server-rendered page.
+
+    Boundaries ride along, newest set first, because an electorate's shape is
+    exactly the kind of thing that changes between elections while the electorate
+    itself persists -- and because every consumer of this payload that draws a
+    map would otherwise have to go back to Django for it on the one night Django
+    is deliberately off the critical path.
     """
+
+    boundaries = PersistentElectorateBoundarySerializer(
+        source='electorateboundary_set', many=True, read_only=True)
 
     class Meta:
         model = Electorate
         fields = ['id', 'name', 'slug', 'region', 'electorate_type', 'status',
-                  'legacy_id']
+                  'legacy_id', 'boundaries']
+
+
+def persistent_electorate_queryset():
+    """Electorates with everything PersistentElectorateSerializer will ask for.
+
+    Without the prefetch, serialising boundaries costs a query per electorate,
+    plus one per boundary for the set and one per shape file for its attribution
+    -- several hundred on a general election.
+
+    Ordered newest set first, so a client that wants the current boundary can
+    take the head of the list, and one rendering a past election can walk down to
+    the first set in force on polling day.
+    """
+    return Electorate.objects.prefetch_related(
+        Prefetch(
+            'electorateboundary_set',
+            queryset=ElectorateBoundary.objects.select_related(
+                'boundary_set',
+                'shape',
+                'shape__copyright_owner',
+                'shape__licence',
+                'shape__licence_grantor',
+                'simplified_shape',
+                'simplified_shape__copyright_owner',
+                'simplified_shape__licence',
+                'simplified_shape__licence_grantor',
+            ).order_by('-boundary_set__valid_from', '-created_at'),
+        ),
+    )
 
 
 class ElectionElectorateSerializer(serializers.ModelSerializer):
@@ -296,7 +379,7 @@ class PersistentDataDownloadView(views.APIView):
     """Download all persistent data (PersistentParty, PersistentCandidate, PersistentVotingPlace)."""
     
     def get(self, request):
-        persistent_electorates = Electorate.objects.all()
+        persistent_electorates = persistent_electorate_queryset()
         persistent_parties = PersistentParty.objects.all()
         persistent_candidates = PersistentCandidate.objects.all()
         persistent_voting_places = PersistentVotingPlace.objects.all()

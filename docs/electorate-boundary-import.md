@@ -125,6 +125,8 @@ After review, run the same command without `--dry-run`.
 
 For each mapping row it resolves the electorate by slug, wraps the matching full and simplified geometries as small FeatureCollections, stores two GeoJSON files on a `Document`, and **`update_or_create`s** an `ElectorateBoundary` for `(electorate, boundary_set)` with `shape` and `simplified_shape` pointing at those files.
 
+Nothing propagates automatically. The election pages read boundaries from two copies of the reference data — the published snapshots and the Firestore `persistent_electorates` documents — each carrying the shape URLs and the set's `valid_from` rather than the geometry. An upload reaches neither until `publish_election_snapshots` (or the admin action) and `push_persistent_to_firebase --only electorates` have run. See **Boundaries ride with the electorate** in `docs/elections.md`.
+
 ::
 
 ## Quick checklist
@@ -132,6 +134,7 @@ For each mapping row it resolves the electorate by slug, wraps the matching full
 1. Two parallel **GeometryCollection** GeoJSON files (full + simplified), same geometry count and order.
 2. Worksheet generated with correct **`--electorate-type`** and **`--date`**; **`electorate_slug`** filled and checked.
 3. **`upload_electorate_boundaries`** with **`--mapping-csv`**, **`--valid-from`**, and paths to both JSON files; **`--dry-run`** first.
+4. **`publish_election_snapshots`** and **`push_persistent_to_firebase --only electorates`**, so the new set reaches the election pages by either path.
 
 ::callout{icon="i-lucide-info" color="neutral"}
 This documentation file was generated largely by Cursor.
