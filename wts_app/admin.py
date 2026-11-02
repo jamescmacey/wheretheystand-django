@@ -5,6 +5,7 @@ from django.contrib.auth.admin import UserAdmin
 
 from wts_app.models import User
 from wts_app.models.elections import (
+    ElectionCandidate,
     ElectionResultVersion,
     ElectorateIncumbent,
     PartyIncumbent,
@@ -181,6 +182,46 @@ class PersistentCandidateAdmin(admin.ModelAdmin):
         _queue(request, push_persistent, ["persistent_candidates"], ids,
                description=f"Queued a Firestore push of {len(ids)} candidate"
                            f"{'' if len(ids) == 1 else 's'}.")
+
+
+@admin.register(ElectionCandidate)
+class ElectionCandidateAdmin(admin.ModelAdmin):
+    """Candidates as they stood in one results version.
+
+    Filtered by election first and version second, because an election usually
+    has several versions and each carries its own copy of every candidate.
+
+    The party and electorate columns show the plain name rather than the
+    object, whose __str__ walks up to the version and election and would cost
+    two extra queries per row.
+    """
+
+    list_display = ("name", "number", "party_name", "list_pos",
+                    "electorate_name", "is_dead", "election",
+                    "results_version", "persistent_candidate")
+    list_filter = ("results_version__election", "results_version", "is_dead")
+    search_fields = ("name", "persistent_candidate__display_name",
+                     "party__name", "party__abbreviation", "electorate__name",
+                     "firebase_id")
+    ordering = ("-results_version__election__polling_date", "results_version",
+                "number")
+    raw_id_fields = ("results_version", "persistent_candidate", "electorate",
+                     "party")
+    list_select_related = ("results_version__election", "persistent_candidate",
+                           "party", "electorate")
+
+    @admin.display(description="Party", ordering="party__name")
+    def party_name(self, obj):
+        return obj.party.name if obj.party else None
+
+    @admin.display(description="Electorate", ordering="electorate__name")
+    def electorate_name(self, obj):
+        return obj.electorate.name if obj.electorate else None
+
+    @admin.display(description="Election",
+                   ordering="results_version__election__polling_date")
+    def election(self, obj):
+        return obj.results_version.election
 
 
 @admin.register(ElectorateIncumbent)
