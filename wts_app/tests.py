@@ -2132,3 +2132,262 @@ class CopyIncumbentsTests(IncumbencyFixture):
         """Red won two seats but one member crossed to it, so two is right."""
         output = self.run_command('--apply')
         self.assertNotIn("counted", output)
+
+
+class SeedElectorateIncumbentsTests(TestCase):
+    """Reading incumbency out of the site's own record of who sits where.
+
+    One election with six seats, each standing for a case the command has to
+    get right or decline: a member standing again, one who crossed the floor,
+    one whose party membership lapsed, a seat nobody holds, a member with no
+    persistent candidate, and a seat redrawn since the last election.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from .models.electorates import Electorate
+        from .models.parliaments import Parliament
+        from .models.parties import Party
+        from .models.people import (
+            ParliamentaryAffiliation, PartyAffiliation, Person)
+
+        cls.as_at = date(2026, 11, 2)
+        nz = dt_timezone(timedelta(hours=13))
+        cls.election = Election.objects.create(
+            name="2026 General Election", slug="ge2026",
+            polling_date=date(2026, 11, 7),
+            polls_close=datetime(2026, 11, 7, 19, 0, tzinfo=nz))
+        cls.version = ElectionResultVersion.objects.create(
+            election=cls.election, name="Preliminary", slug="preliminary",
+            is_primary=True, firebase_id="ge2026_prelim")
+        cls.parliament = Parliament.objects.create(
+            number=54, start_date=date(2023, 12, 5))
+
+        # Blue is linked to its persistent record; Red is only matchable by
+        # name, which is the state the real data is in.
+        cls.blue_party = Party.objects.create(
+            legal_name="Blue Party of New Zealand", display_name="Blue Party",
+            short_name="Blue", abbreviation="BLU")
+        cls.red_party = Party.objects.create(
+            legal_name="Red Party of New Zealand", display_name="Red Party",
+            short_name="Red", abbreviation="RED")
+        cls.blue = PersistentParty.objects.create(
+            party=cls.blue_party, display_name="Blue Party",
+            abbreviation="BLU", firebase_id="pp_blue")
+        cls.red = PersistentParty.objects.create(
+            display_name="Red Party", abbreviation="RED", firebase_id="pp_red")
+
+        def electorate(name, **extra):
+            return Electorate.objects.create(
+                name=name, region="Somewhere", valid_from=date(2020, 1, 1),
+                **extra)
+
+        cls.ilam = electorate("Ilam")
+        cls.epsom = electorate("Epsom")
+        cls.rongotai = electorate("Rongotai")
+        cls.papakura = electorate("Papakura")
+        cls.newtown = electorate("Newtown")
+        cls.old_bay = electorate("Old Bay", status="retiring")
+        cls.new_bay = electorate("New Bay", status="new", replaced=cls.old_bay)
+
+        # Every seat above except the one it replaced is contested here.
+        contested = [cls.ilam, cls.epsom, cls.rongotai, cls.papakura,
+                     cls.newtown, cls.new_bay]
+        for number, seat in enumerate(contested, start=1):
+            ElectionElectorate.objects.create(
+                results_version=cls.version, number=number, name=seat.name,
+                electorate=seat)
+
+        def member(name, seat, party, *, ended=None, left_for=None,
+                   lapsed=False, candidate=True):
+            person = Person.objects.create(
+                first_name=name.split()[0], last_name=name.split()[-1],
+                display_name=name)
+            ParliamentaryAffiliation.objects.create(
+                person=person, parliament=cls.parliament, electorate=seat,
+                elected_date=date(2023, 10, 14), sworn_date=date(2023, 12, 5),
+                end_date=ended)
+            PartyAffiliation.objects.create(
+                person=person, party=party, start_date=date(2023, 10, 14),
+                end_date=(date(2025, 6, 30) if (left_for or lapsed) else None))
+            if left_for:
+                PartyAffiliation.objects.create(
+                    person=person, party=left_for, start_date=date(2025, 7, 1))
+            if candidate:
+                PersistentCandidate.objects.create(
+                    person=person,
+                    display_name=f'{person.last_name.upper()}, {person.first_name}')
+            return person
+
+        cls.standing = member("Hannah Hold", cls.ilam, cls.blue_party)
+        cls.defector = member("Carla Cross", cls.epsom, cls.blue_party,
+                              left_for=cls.red_party)
+        cls.independent = member("Ivor Alone", cls.rongotai, cls.red_party,
+                                 lapsed=True)
+        # Resigned mid-term with no by-election, so the seat is nobody's.
+        cls.resigned = member("Vera Gone", cls.papakura, cls.blue_party,
+                              ended=date(2026, 5, 14))
+        cls.unlinked = member("Nora Nobody", cls.newtown, cls.blue_party,
+                              candidate=False)
+        cls.redrawn = member("Barry Bay", cls.old_bay, cls.red_party)
+
+    def run_command(self, *args):
+        from django.core.management import call_command
+        from io import StringIO
+
+        out = StringIO()
+        call_command('seed_electorate_incumbents', '--election-slug', 'ge2026',
+                     '--version-slug', 'preliminary',
+                     '--as-at', self.as_at.isoformat(), *args, stdout=out)
+        return out.getvalue()
+
+    def rows(self):
+        return ElectorateIncumbent.objects.filter(results_version=self.version)
+
+    def row_for(self, electorate):
+        return self.rows().filter(electorate=electorate).first()
+
+    # -- what it writes --------------------------------------------------
+
+    def test_dry_run_reports_and_writes_nothing(self):
+        output = self.run_command()
+        self.assertIn("Nothing was changed", output)
+        self.assertEqual(self.rows().count(), 0)
+
+    def test_a_sitting_member_is_recorded_against_the_party_that_won_the_seat(self):
+        self.run_command('--apply')
+        row = self.row_for(self.ilam)
+        self.assertEqual(row.persistent_candidate.person_id, self.standing.id)
+        self.assertEqual(row.persistent_party_id, self.blue.id)
+        self.assertFalse(row.has_left_party)
+
+    def test_a_member_who_crossed_the_floor_keeps_the_party_they_won_for(self):
+        """The seat is still Blue-held; the member is Red now."""
+        self.run_command('--apply')
+        row = self.row_for(self.epsom)
+        self.assertEqual(row.persistent_party_id, self.blue.id)
+        self.assertTrue(row.has_left_party)
+        self.assertEqual(row.current_persistent_party_id, self.red.id)
+
+    def test_a_lapsed_membership_reads_as_sitting_independent(self):
+        # An affiliation that ended with nothing after it is the only record of
+        # a member on the cross benches, and the one case the candidate list
+        # can never show.
+        self.run_command('--apply')
+        row = self.row_for(self.rongotai)
+        self.assertEqual(row.persistent_party_id, self.red.id)
+        self.assertTrue(row.has_left_party)
+        self.assertIsNone(row.current_persistent_party_id)
+
+    def test_a_seat_nobody_holds_is_written_as_vacant(self):
+        self.run_command('--apply')
+        row = self.row_for(self.papakura)
+        self.assertIsNone(row.persistent_candidate_id)
+        self.assertEqual(row.persistent_party_id, self.blue.id)
+        self.assertIn("vacant", row.notes)
+
+    def test_a_party_matched_only_by_name_still_resolves(self):
+        """Nothing has filled in the link between the two party tables."""
+        self.run_command('--apply')
+        self.assertEqual(self.row_for(self.rongotai).persistent_party_id,
+                         self.red.id)
+
+    def test_seeded_rows_say_where_they_came_from(self):
+        self.run_command('--apply')
+        self.assertIn(str(self.as_at), self.row_for(self.ilam).notes)
+
+    # -- what it declines to write ----------------------------------------
+
+    def test_a_member_without_a_persistent_candidate_is_skipped(self):
+        # Writing the row with an empty candidate would say the seat was
+        # vacant, which is a different and false statement.
+        output = self.run_command('--apply')
+        self.assertIsNone(self.row_for(self.newtown))
+        self.assertIn("no persistent candidate", output)
+
+    def test_create_candidates_recovers_that_seat(self):
+        self.run_command('--apply', '--create-candidates')
+        row = self.row_for(self.newtown)
+        self.assertEqual(row.persistent_candidate.person_id, self.unlinked.id)
+        self.assertEqual(row.persistent_candidate.display_name, "NOBODY, Nora")
+
+    def test_a_redrawn_seat_is_left_alone_by_default(self):
+        output = self.run_command('--apply')
+        self.assertIsNone(self.row_for(self.new_bay))
+        self.assertIn("New Bay", output)
+
+    def test_following_replacements_carries_the_member_across(self):
+        self.run_command('--apply', '--follow-replacements')
+        row = self.row_for(self.new_bay)
+        self.assertEqual(row.persistent_candidate.person_id, self.redrawn.id)
+        self.assertIn("Old Bay", row.notes)
+
+    def test_a_by_election_reports_only_the_seat_it_contests(self):
+        """Every other seat in the country is not up for election."""
+        from django.core.management import call_command
+        from io import StringIO
+
+        by_election = ElectionResultVersion.objects.create(
+            election=self.election, name="By-election", slug="by-election",
+            firebase_id="ge2026_by")
+        ElectionElectorate.objects.create(
+            results_version=by_election, number=1, name=self.ilam.name,
+            electorate=self.ilam)
+
+        out = StringIO()
+        call_command('seed_electorate_incumbents', '--election-slug', 'ge2026',
+                     '--version-slug', 'by-election',
+                     '--as-at', self.as_at.isoformat(), stdout=out)
+        output = out.getvalue()
+
+        self.assertIn("Hannah Hold", output)
+        for absent in ("Epsom", "Rongotai", "Old Bay", "Newtown"):
+            self.assertNotIn(absent, output)
+
+    # -- running it again --------------------------------------------------
+
+    def test_running_twice_changes_nothing(self):
+        self.run_command('--apply', '--create-candidates')
+        before = sorted(self.rows().values_list('electorate_id', 'notes'))
+        output = self.run_command('--apply', '--create-candidates')
+        self.assertIn("already the same", output)
+        self.assertEqual(sorted(self.rows().values_list('electorate_id', 'notes')),
+                         before)
+
+    def test_curated_rows_are_left_alone_unless_overwritten(self):
+        curated = ElectorateIncumbent.objects.create(
+            results_version=self.version, electorate=self.ilam,
+            persistent_party=self.red, notes="Checked by hand")
+        output = self.run_command('--apply')
+        curated.refresh_from_db()
+        self.assertEqual(curated.persistent_party_id, self.red.id)
+        self.assertIn("already curated differently", output)
+
+        self.run_command('--apply', '--overwrite')
+        curated.refresh_from_db()
+        self.assertEqual(curated.persistent_party_id, self.blue.id)
+        # The note is the curator's own and is not replaced with a seed's.
+        self.assertEqual(curated.notes, "Checked by hand")
+
+    # -- refusals -----------------------------------------------------------
+
+    def test_a_date_it_cannot_read_is_refused(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        with self.assertRaisesMessage(CommandError, 'is not a date'):
+            call_command('seed_electorate_incumbents', '--election-slug',
+                         'ge2026', '--version-slug', 'preliminary',
+                         '--as-at', '2 November 2026')
+
+    def test_a_version_with_no_linked_electorates_is_refused(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        empty = ElectionResultVersion.objects.create(
+            election=self.election, name="Empty", slug="empty",
+            firebase_id="ge2026_empty")
+        with self.assertRaisesMessage(CommandError, 'no electorates'):
+            call_command('seed_electorate_incumbents', '--election-slug',
+                         'ge2026', '--version-slug', empty.slug,
+                         '--as-at', self.as_at.isoformat())
