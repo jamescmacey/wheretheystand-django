@@ -2391,3 +2391,160 @@ class SeedElectorateIncumbentsTests(TestCase):
             call_command('seed_electorate_incumbents', '--election-slug',
                          'ge2026', '--version-slug', empty.slug,
                          '--as-at', self.as_at.isoformat())
+
+
+class ComparisonAndPublishFlagTests(TestCase):
+    """The comparison file, the alternate colour and the publish flag.
+
+    The comparison file is what lets a later dashboard measure itself against
+    an earlier election by loading one object, so everything in it has to be
+    resolvable without that election's reference data.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from .models import Electorate
+
+        nz = dt_timezone(timedelta(hours=13))
+        cls.ilam = Electorate.objects.create(
+            name="Ilam", legacy_id=17, region="Canterbury",
+            valid_from=date(2020, 1, 1))
+        cls.blue = PersistentParty.objects.create(
+            display_name="Blue Party", colour="#0000ff", alternate_colour="#00aaff")
+        cls.red = PersistentParty.objects.create(display_name="Red Party", colour="#ff0000")
+        cls.sitting = PersistentCandidate.objects.create(display_name="Jane Smith")
+
+        cls.old = Election.objects.create(
+            name="2023 General Election", polling_date=date(2023, 10, 14),
+            polls_close=datetime(2023, 10, 14, 19, 0, tzinfo=nz))
+        cls.old_version = ElectionResultVersion.objects.create(
+            election=cls.old, name="Official count", is_primary=True, is_final=True)
+
+        electorate = ElectionElectorate.objects.create(
+            results_version=cls.old_version, number=1, name="Ilam", electorate=cls.ilam)
+        unlinked_electorate = ElectionElectorate.objects.create(
+            results_version=cls.old_version, number=2, name="Gone")
+        blue = ElectionParty.objects.create(
+            results_version=cls.old_version, number=1, name="Blue Party",
+            persistent_party=cls.blue)
+        # Contested 2023 but has no persistent record.
+        other = ElectionParty.objects.create(
+            results_version=cls.old_version, number=2, name="Other Party")
+        smith = ElectionCandidate.objects.create(
+            results_version=cls.old_version, number=1, name="SMITH, Jane",
+            electorate=electorate, party=blue, persistent_candidate=cls.sitting)
+        unlinked = ElectionCandidate.objects.create(
+            results_version=cls.old_version, number=2, name="BLOGGS, Joe",
+            electorate=electorate, party=other)
+
+        national = ResultsSet.objects.create(
+            results_version=cls.old_version, results_level="national",
+            results_category="party_votes", is_final=True,
+            updated=datetime(2023, 11, 3, 14, 0, tzinfo=nz))
+        Result.objects.create(results_set=national, party=blue, count=300,
+                              per_cent=99.0, electorate_seats=5, list_seats=10,
+                              total_seats=15)
+        Result.objects.create(results_set=national, party=other, count=100)
+
+        seat = ResultsSet.objects.create(
+            results_version=cls.old_version, results_level="electorate",
+            results_category="candidate_votes", electorate=electorate,
+            updated=datetime(2023, 11, 3, 14, 0, tzinfo=nz))
+        Result.objects.create(results_set=seat, candidate=smith, count=750)
+        Result.objects.create(results_set=seat, candidate=unlinked, count=250)
+
+        party_vote = ResultsSet.objects.create(
+            results_version=cls.old_version, results_level="electorate",
+            results_category="party_votes", electorate=electorate,
+            updated=datetime(2023, 11, 3, 14, 0, tzinfo=nz))
+        Result.objects.create(results_set=party_vote, party=blue, count=40)
+        Result.objects.create(results_set=party_vote, party=other, count=10)
+
+        nowhere = ResultsSet.objects.create(
+            results_version=cls.old_version, results_level="electorate",
+            results_category="party_votes", electorate=unlinked_electorate,
+            updated=datetime(2023, 11, 3, 14, 0, tzinfo=nz))
+        Result.objects.create(results_set=nowhere, party=blue, count=1)
+
+        cls.new = Election.objects.create(
+            name="2026 General Election", polling_date=date(2026, 11, 7),
+            polls_close=datetime(2026, 11, 7, 19, 0, tzinfo=nz))
+        cls.new_version = ElectionResultVersion.objects.create(
+            election=cls.new, name="Election night", is_primary=True,
+            comparison_version=cls.old_version)
+
+    def test_persistent_parties_carry_the_alternate_colour(self):
+        parties = {p['display_name']: p
+                   for p in builders.build_persistent()['persistent_parties']}
+        self.assertEqual(parties['Blue Party']['alternate_colour'], '#00aaff')
+        self.assertIsNone(parties['Red Party']['alternate_colour'])
+
+    def test_comparison_is_keyed_on_persistent_ids_only(self):
+        comparison = builders.build_comparison(self.old_version)
+
+        self.assertEqual(comparison['election']['slug'], '2023-general-election')
+        self.assertEqual(list(comparison['electorates']), [str(self.ilam.id)])
+
+        seat = comparison['electorates'][str(self.ilam.id)]['candidate_votes']
+        self.assertEqual(seat['total_valid_votes'], 1000)
+        self.assertEqual(seat['candidates'][0], {
+            'candidate': str(self.sitting.id), 'party': str(self.blue.id),
+            'count': 750, 'per_cent': 75.0})
+        # Unmatchable, but still part of the valid vote.
+        self.assertEqual(seat['candidates'][1], {
+            'candidate': None, 'party': None, 'count': 250, 'per_cent': 25.0})
+
+        party_vote = comparison['electorates'][str(self.ilam.id)]['party_votes']
+        self.assertEqual(party_vote['parties'][0]['per_cent'], 80.0)
+
+    def test_comparison_shares_are_of_the_whole_valid_vote(self):
+        """The stored per_cent is overridden so every share has one total."""
+        national = builders.build_comparison(self.old_version)['national']['party_votes']
+        blue, other = national['parties']
+        self.assertEqual(blue['party'], str(self.blue.id))
+        self.assertEqual(blue['per_cent'], 75.0)
+        self.assertEqual(blue['total_seats'], 15)
+        self.assertIsNone(other['party'])
+        self.assertEqual(other['per_cent'], 25.0)
+
+    def test_comparison_is_published_with_the_later_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            published = publisher.publish_all(publisher.LocalWriter(root))
+            manifest = json.loads((root / "manifest.json").read_text())
+
+            paths = published['2026-general-election/election-night']
+            self.assertRegex(
+                paths['comparison'],
+                r'^events/2026-general-election/election-night/comparison-[0-9a-f]{12}\.json$')
+            comparison = json.loads((root / paths['comparison']).read_text())
+
+        self.assertEqual(comparison['results_version']['id'], str(self.old_version.id))
+        self.assertNotIn('comparison',
+                         published['2023-general-election/official-count'])
+        entries = {v['slug']: v for e in manifest['elections']
+                   for v in e['results_versions']}
+        self.assertEqual(entries['election-night']['paths']['comparison'],
+                         paths['comparison'])
+
+    def test_comparison_must_be_another_election(self):
+        from django.core.exceptions import ValidationError
+
+        self.old_version.comparison_version = ElectionResultVersion.objects.create(
+            election=self.old, name="Preliminary")
+        with self.assertRaises(ValidationError) as caught:
+            self.old_version.clean()
+        self.assertIn('comparison_version', caught.exception.message_dict)
+
+    def test_an_unpublished_version_stays_out_of_the_manifest(self):
+        ElectionResultVersion.objects.filter(id=self.new_version.id).update(publish=False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            published = publisher.publish_all(publisher.LocalWriter(root))
+            manifest = json.loads((root / "manifest.json").read_text())
+
+        # Its payloads are still written, so they can be checked first.
+        self.assertIn('2026-general-election/election-night', published)
+        slugs = {e['slug'] for e in manifest['elections']}
+        self.assertEqual(slugs, {'2023-general-election'})

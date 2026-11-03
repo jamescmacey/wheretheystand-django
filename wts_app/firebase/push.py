@@ -185,6 +185,7 @@ def build_persistent_party_document(party):
         'short_name': party.short_name,
         'abbreviation': party.abbreviation,
         'colour': party.colour,
+        'alternate_colour': party.alternate_colour,
         'wts_id': str(party.id),
     }
 

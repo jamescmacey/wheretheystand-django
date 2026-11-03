@@ -60,9 +60,9 @@ class PartyIncumbentInline(admin.TabularInline):
 
 @admin.register(ElectionResultVersion)
 class ElectionResultVersionAdmin(admin.ModelAdmin):
-    list_display = ("name", "election", "is_primary", "access_mode", "is_live",
-                    "is_final", "firebase_id", "last_snapshot_published_at")
-    list_filter = ("is_live", "is_final", "access_mode", "is_primary")
+    list_display = ("name", "election", "is_primary", "publish", "access_mode",
+                    "is_live", "is_final", "firebase_id", "last_snapshot_published_at")
+    list_filter = ("publish", "is_live", "is_final", "access_mode", "is_primary")
     search_fields = ("name", "slug", "firebase_id", "election__name")
     readonly_fields = ("refdata_built", "snapshot_paths",
                        "last_firebase_push_at", "last_snapshot_published_at")
@@ -74,7 +74,8 @@ class ElectionResultVersionAdmin(admin.ModelAdmin):
     # rule stated next to them.
     fieldsets = (
         (None, {
-            "fields": ("election", "name", "slug", "description", "is_primary"),
+            "fields": ("election", "name", "slug", "description", "is_primary",
+                       "publish"),
         }),
         ("Transport", {
             "fields": ("access_mode", "firebase_id", "is_live", "is_final",
@@ -94,7 +95,12 @@ class ElectionResultVersionAdmin(admin.ModelAdmin):
             "fields": ("bloc_order_left", "bloc_order_right"),
         }),
         ("Comparison", {
-            "fields": ("comparison_version_ids",),
+            "description": (
+                "<code>comparison_version</code> is the version in another "
+                "election that the dashboard compares this one against. Its "
+                "results are published with this version's snapshots, so "
+                "republish the snapshots after changing it."),
+            "fields": ("comparison_version", "comparison_version_ids"),
         }),
         ("Presentation", {
             "fields": ("card_image", "card_url", "vp_finder_url"),
@@ -153,7 +159,8 @@ class ElectionResultVersionAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentParty)
 class PersistentPartyAdmin(admin.ModelAdmin):
-    list_display = ("display_name", "abbreviation", "colour", "party", "firebase_id")
+    list_display = ("display_name", "abbreviation", "colour", "alternate_colour",
+                    "party", "firebase_id")
     search_fields = ("display_name", "abbreviation", "short_name")
     actions = ("push_to_firestore",)
 

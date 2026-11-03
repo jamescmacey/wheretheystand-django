@@ -105,6 +105,141 @@ def build_results(results_version):
     return {'results_sets': ResultsSetSerializer(queryset, many=True).data}
 
 
+def _comparison_tally(results_set, key, entry_for):
+    """One results set reduced to persistent ids, counts and shares.
+
+    The share is worked out here rather than left to the client, because the
+    client cannot: an entry with no persistent link is still part of the valid
+    vote, and the client holding only the entries it can match would divide by
+    the wrong total. ``per_cent`` is computed from the counts where they exist,
+    so every share in a tally is of the same total, and falls back to the
+    Commission's own figure where they do not.
+    """
+    results = list(results_set.result_set.all())
+    total = sum(result.count or 0 for result in results)
+
+    entries = []
+    for result in results:
+        if total and result.count is not None:
+            per_cent = round(result.count / total * 100, 2)
+        else:
+            per_cent = result.per_cent
+        entries.append({**entry_for(result),
+                        'count': result.count, 'per_cent': per_cent})
+    entries.sort(key=lambda entry: entry['count'] or 0, reverse=True)
+
+    return {
+        'is_final': results_set.is_final,
+        'total_valid_votes': total,
+        key: entries,
+    }
+
+
+def _persistent_party_of(party):
+    if party is None or party.persistent_party_id is None:
+        return None
+    return str(party.persistent_party_id)
+
+
+def _party_entry(result):
+    return {'party': _persistent_party_of(result.party)}
+
+
+def _national_party_entry(result):
+    return {
+        **_party_entry(result),
+        'electorate_seats': result.electorate_seats,
+        'list_seats': result.list_seats,
+        'total_seats': result.total_seats,
+    }
+
+
+def _candidate_entry(result):
+    candidate = result.candidate
+    if candidate is None:
+        return {'candidate': None, 'party': None}
+    return {
+        'candidate': (str(candidate.persistent_candidate_id)
+                      if candidate.persistent_candidate_id else None),
+        # The party the candidate stood for then, so that a seat can be
+        # compared party against party where the candidate has changed.
+        'party': _persistent_party_of(candidate.party),
+    }
+
+
+def build_comparison(comparison_version):
+    """Another election's results, keyed only on persistent ids.
+
+    Published with the version that compares against it, so the dashboard
+    loads one file rather than that election's reference data and results.
+    Nothing election-scoped survives into it: no Commission numbers and no
+    names, only the persistent electorate, party and candidate each tally
+    belongs to. That is all a later election needs to match a result, and it
+    keeps the file small.
+
+    Entries with no persistent link are kept, with a null id. They cannot be
+    matched, but they are part of the valid vote, and a reader asking who held
+    a seat needs the winner whether or not they stood again.
+
+    Electorates with no persistent link are left out: there is nothing a later
+    election could key them on. Voting places are left out altogether.
+    """
+    queryset = ResultsSet.objects.filter(
+        results_version=comparison_version,
+        results_level__in=['national', 'electorate'],
+    ).select_related('electorate').prefetch_related(
+        Prefetch('result_set', queryset=Result.objects.select_related(
+            'party', 'candidate', 'candidate__party'))
+    ).order_by('updated')
+
+    national = {'party_votes': None}
+    electorates = {}
+
+    # Ordered by update, so where two sets share a level, category and
+    # electorate, the newer one is the one kept.
+    for results_set in queryset:
+        if results_set.results_level == 'national':
+            if results_set.results_category == 'party_votes':
+                national['party_votes'] = _comparison_tally(
+                    results_set, 'parties', _national_party_entry)
+            continue
+
+        persistent_electorate = (results_set.electorate.electorate_id
+                                 if results_set.electorate_id else None)
+        if persistent_electorate is None:
+            continue
+
+        held = electorates.setdefault(
+            str(persistent_electorate),
+            {'party_votes': None, 'candidate_votes': None})
+        if results_set.results_category == 'party_votes':
+            held['party_votes'] = _comparison_tally(
+                results_set, 'parties', _party_entry)
+        else:
+            held['candidate_votes'] = _comparison_tally(
+                results_set, 'candidates', _candidate_entry)
+
+    election = comparison_version.election
+    return {
+        'version': 1,
+        'election': {
+            'id': str(election.id),
+            'slug': election.slug,
+            'name': election.name,
+            'polling_date': (election.polling_date.isoformat()
+                             if election.polling_date else None),
+        },
+        'results_version': {
+            'id': str(comparison_version.id),
+            'slug': comparison_version.slug,
+            'name': comparison_version.name,
+            'is_final': comparison_version.is_final,
+        },
+        'national': national,
+        'electorates': electorates,
+    }
+
+
 def build_voting_places_for_electorate(results_version, electorate):
     """Voting place results within one electorate."""
     queryset = _results_queryset(results_version).filter(
@@ -313,7 +448,8 @@ def publishable_versions():
     makes -- not the most electorate seats, which would put a party of eleven
     above one of fifteen.
     """
-    return ElectionResultVersion.objects.select_related('election').prefetch_related(
+    return ElectionResultVersion.objects.select_related(
+        'election', 'comparison_version__election').prefetch_related(
         Prefetch('electorate_incumbents',
                  queryset=ElectorateIncumbent.objects.order_by('electorate__name')),
         Prefetch('party_incumbents',
