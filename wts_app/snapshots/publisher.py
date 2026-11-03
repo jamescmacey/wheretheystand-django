@@ -144,6 +144,18 @@ def publish_results(writer, version):
                          builders.build_results(version))
 
 
+def publish_comparison(writer, version):
+    """Publish the results this version is compared against.
+
+    Under this version's prefix rather than the other election's, because it is
+    this version's choice of comparison that decides what goes in it. Rebuilt
+    on every publish, so a correction to the earlier results reaches the later
+    dashboard the next time it is published.
+    """
+    return _write_hashed(writer, _event_prefix(version), 'comparison',
+                         builders.build_comparison(version.comparison_version))
+
+
 def publish_voting_places(writer, version):
     """Publish voting place reference data, per-electorate and per-place results.
 
@@ -192,6 +204,8 @@ def publish_version(writer, version, persistent_path, include_voting_places=Fals
         'reference': publish_reference(writer, version),
         'results': publish_results(writer, version),
     }
+    if version.comparison_version_id:
+        paths['comparison'] = publish_comparison(writer, version)
     if include_voting_places:
         paths['voting_places'] = publish_voting_places(writer, version)
     return paths
@@ -211,12 +225,15 @@ def build_manifest_entries(paths_by_version=None):
     this run.
 
     A version that has never been published has nothing to point at and is left
-    out until it does.
+    out until it does. So is one with ``publish`` cleared, whatever has been
+    published for it: that is how a version is held back until it is checked.
     """
     paths_by_version = paths_by_version or {}
     entries_by_election = {}
 
     for version in builders.publishable_versions():
+        if not version.publish:
+            continue
         paths = paths_by_version.get(version.id) or version.snapshot_paths
         if not paths:
             continue

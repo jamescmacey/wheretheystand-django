@@ -95,6 +95,19 @@ class ElectionResultVersion(BaseModel):
     # entries per event justifies. Validated in clean() instead.
     comparison_version_ids = models.JSONField(default=list, blank=True)
 
+    # The results version in another election that this one is measured
+    # against on the dashboard -- 2023 for 2026, say. Published alongside this
+    # version's payloads as a single comparison file keyed on persistent ids,
+    # so the client never has to load the other election's reference data.
+    comparison_version = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, blank=True, null=True,
+        related_name='+')
+
+    # Whether this version appears in the manifest at all. Clearing it hides a
+    # version that has not been checked yet; its payloads can still be
+    # published, but nothing points a client at them.
+    publish = models.BooleanField(default=True)
+
     # The two political blocs, as ordered PersistentParty UUIDs, so that parties
     # likely to govern together are drawn together rather than by size. One rule
     # decides the whole seating plan: [*left, *cross-bench, *right] reads from
@@ -141,6 +154,14 @@ class ElectionResultVersion(BaseModel):
             ElectionResultVersion, self.comparison_version_ids)
         if missing:
             errors['comparison_version_ids'] = f"Unknown results versions: {missing}"
+
+        # Comparing against another version of the same election is a
+        # different question (election night against the final count), and the
+        # comparison file is not built to answer it.
+        if (self.comparison_version_id and self.election_id
+                and self.comparison_version.election_id == self.election_id):
+            errors['comparison_version'] = (
+                "Choose a results version from a different election.")
 
         for field in ('bloc_order_left', 'bloc_order_right'):
             missing = self._missing_ids(PersistentParty, getattr(self, field))
@@ -210,6 +231,10 @@ class PersistentParty(BaseModel):
     firebase_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     abbreviation = models.TextField(blank=True, null=True)
     colour = ColorField(blank=True, null=True)
+    # A second colour for a party whose own is too close to another party's.
+    # Where set, bars, dots and squares are drawn half in each, so the two can
+    # still be told apart. Null for almost every party.
+    alternate_colour = ColorField(blank=True, null=True)
     display_name = models.TextField(blank=True, null=True)
     short_name = models.TextField(blank=True, null=True)
 
