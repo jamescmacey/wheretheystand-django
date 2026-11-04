@@ -1663,6 +1663,32 @@ class PersistentMatchingTests(TestCase):
 
         self.assertEqual(VotingPlaceMatcher(self.version).classify(place).kind, CREATE)
 
+    def test_history_shows_how_a_suggestion_stood_last_time(self):
+        from .matching.matchers import CandidateMatcher
+
+        nz = dt_timezone(timedelta(hours=13))
+        previous_election = Election.objects.create(
+            name="2023 General Election", polling_date=date(2023, 10, 14),
+            polls_close=datetime(2023, 10, 14, 19, 0, tzinfo=nz))
+        previous = ElectionResultVersion.objects.create(
+            election=previous_election, name="Official", is_primary=True)
+        electorate = ElectionElectorate.objects.create(
+            results_version=previous, number=1, name="Wellington Central")
+        party = ElectionParty.objects.create(
+            results_version=previous, number=3, name="Green Party")
+        ElectionCandidate.objects.create(
+            results_version=previous, number=1, name="GREENSLADE, David",
+            electorate=electorate, party=party, list_pos=12,
+            persistent_candidate=self.returning)
+        absent = PersistentCandidate.objects.create(display_name="NOBODY, Last Time")
+
+        self.assertIsNone(CandidateMatcher(self.version).history(self.returning))
+
+        matcher = CandidateMatcher(self.version, previous_version=previous)
+        self.assertEqual(matcher.history(self.returning),
+                         ['GREENSLADE, David: Green Party, Wellington Central, list 12'])
+        self.assertEqual(matcher.history(absent), [])
+
     def test_electorates_are_never_created_automatically(self):
         """They carry boundaries, regions and slugs a results feed cannot supply."""
         from .matching.matchers import ElectorateMatcher

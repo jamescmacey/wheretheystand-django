@@ -42,6 +42,12 @@ class Suggestion:
     persistent: object
     score: float = 0.0
     detail: str = ''
+    #: Every plausible record when the match is ambiguous, `persistent` first.
+    alternatives: list = field(default_factory=list)
+
+    @property
+    def options(self):
+        return self.alternatives or [self.persistent]
 
 
 @dataclass
@@ -65,8 +71,12 @@ class Matcher:
     #: Whether --create-missing may create persistent records for this type.
     can_create = True
 
-    def __init__(self, version, min_score=0.80, threshold_metres=None):
+    def __init__(self, version, min_score=0.80, threshold_metres=None,
+                 previous_version=None):
         self.version = version
+        #: An earlier results version, shown alongside suggestions so a person
+        #: can see what a persistent record looked like last time.
+        self.previous_version = previous_version
         self.min_score = min_score
         self.threshold_metres = threshold_metres or geo.DEFAULT_THRESHOLD_METRES
         self._prepare()
@@ -99,6 +109,14 @@ class Matcher:
         """Extra facts a person needs to judge a suggestion."""
         return ''
 
+    def history(self, persistent):
+        """What `persistent` looked like in the previous version, one line each.
+
+        Returns None when there is no previous version to compare against, and
+        an empty list when the record did not appear in it.
+        """
+        return None
+
 
 class CandidateMatcher(Matcher):
     key = 'candidates'
@@ -115,6 +133,14 @@ class CandidateMatcher(Matcher):
             self.by_surname.setdefault(surname, []).append(candidate)
             self.pool[candidate.display_name] = candidate
 
+        self.previous = {}
+        if self.previous_version is not None:
+            for candidate in ElectionCandidate.objects.filter(
+                    results_version=self.previous_version,
+                    persistent_candidate__isnull=False,
+            ).select_related('party', 'electorate'):
+                self.previous.setdefault(candidate.persistent_candidate_id, []).append(candidate)
+
     def all_entities(self):
         return ElectionCandidate.objects.filter(
             results_version=self.version).select_related('party', 'electorate')
@@ -127,7 +153,8 @@ class CandidateMatcher(Matcher):
         if len(exact) == 1:
             return Outcome(entity, EXACT, Suggestion(exact[0], 1.0, 'identical name'))
         if len(exact) > 1:
-            return Outcome(entity, REVIEW, Suggestion(exact[0], 1.0, 'identical name'),
+            return Outcome(entity, REVIEW,
+                           Suggestion(exact[0], 1.0, 'identical name', alternatives=exact),
                            notes=[f'{len(exact)} persistent candidates share this name'])
 
         # The structural rule runs over every record sharing a surname, and is
@@ -142,7 +169,9 @@ class CandidateMatcher(Matcher):
                                entity.name, structural[0].display_name),
                                'same surname, given names are a prefix'))
         if len(structural) > 1:
-            return Outcome(entity, REVIEW, Suggestion(structural[0]),
+            return Outcome(entity, REVIEW,
+                           Suggestion(structural[0], detail='middle names differ',
+                                      alternatives=structural),
                            notes=[f'{len(structural)} records differ only by middle names'])
 
         similar, score = names.best_similar(entity.name, self.pool, self.min_score)
@@ -170,6 +199,12 @@ class CandidateMatcher(Matcher):
         if entity.list_pos:
             bits.append(f'list {entity.list_pos}')
         return ', '.join(bits)
+
+    def history(self, persistent):
+        if self.previous_version is None:
+            return None
+        return [f'{candidate.name}: {self.context(candidate)}'
+                for candidate in self.previous.get(persistent.pk, [])]
 
 
 class PartyMatcher(Matcher):
