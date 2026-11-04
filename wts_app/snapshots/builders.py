@@ -375,6 +375,9 @@ def build_version_entry(results_version, paths):
         'name': results_version.name,
         'description': results_version.description,
         'is_primary': results_version.is_primary,
+        # False for an unlisted version: in the manifest so it can be opened by
+        # URL and compared against, but left out of every list of versions.
+        'listed': results_version.publish_status != results_version.UNLISTED,
         'access_mode': results_version.access_mode,
         'firebase_id': results_version.firebase_id,
         # is_live is what decides whether the client opens Firestore listeners.

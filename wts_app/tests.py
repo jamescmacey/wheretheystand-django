@@ -377,6 +377,17 @@ class SnapshotPublisherTests(TestCase):
             self.assertEqual(reference["candidates"][0]["party"], 5)
             self.assertEqual(reference["voting_places"], [])
 
+    def test_republish_without_voting_places_keeps_their_paths(self):
+        """Republishing results alone must not unpublish the voting place files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = publisher.LocalWriter(pathlib.Path(tmp))
+            first = publisher.publish_version(
+                writer, self.v, "persistent.json", include_voting_places=True)
+            self.v.snapshot_paths = first
+
+            again = publisher.publish_version(writer, self.v, "persistent.json")
+            self.assertEqual(again["voting_places"], first["voting_places"])
+
     def test_sets_split_across_reports_keep_separate_keys(self):
         """Advance and polling-day votes for one place must both survive.
 
@@ -2537,7 +2548,8 @@ class ComparisonAndPublishFlagTests(TestCase):
         self.assertIn('comparison_version', caught.exception.message_dict)
 
     def test_an_unpublished_version_stays_out_of_the_manifest(self):
-        ElectionResultVersion.objects.filter(id=self.new_version.id).update(publish=False)
+        ElectionResultVersion.objects.filter(id=self.new_version.id).update(
+            publish_status=ElectionResultVersion.UNPUBLISHED)
 
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -2548,3 +2560,20 @@ class ComparisonAndPublishFlagTests(TestCase):
         self.assertIn('2026-general-election/election-night', published)
         slugs = {e['slug'] for e in manifest['elections']}
         self.assertEqual(slugs, {'2023-general-election'})
+
+    def test_an_unlisted_version_is_in_the_manifest_but_not_listed(self):
+        ElectionResultVersion.objects.filter(id=self.old_version.id).update(
+            publish_status=ElectionResultVersion.UNLISTED)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            published = publisher.publish_all(publisher.LocalWriter(root))
+            manifest = json.loads((root / "manifest.json").read_text())
+
+        entries = {v['slug']: v for e in manifest['elections']
+                   for v in e['results_versions']}
+        self.assertFalse(entries['official-count']['listed'])
+        self.assertTrue(entries['election-night']['listed'])
+        # A published version still compares against an unlisted one.
+        self.assertIn('comparison', published['2026-general-election/election-night'])
+        self.assertIn('comparison', entries['election-night']['paths'])
