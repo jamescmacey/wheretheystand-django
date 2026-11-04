@@ -208,6 +208,11 @@ def publish_version(writer, version, persistent_path, include_voting_places=Fals
         paths['comparison'] = publish_comparison(writer, version)
     if include_voting_places:
         paths['voting_places'] = publish_voting_places(writer, version)
+    elif (version.snapshot_paths or {}).get('voting_places'):
+        # Carried forward rather than dropped. The voting place files sit at
+        # fixed paths and are still in the bucket; a republish of the results
+        # alone must not unpublish them by leaving them out of the manifest.
+        paths['voting_places'] = version.snapshot_paths['voting_places']
     return paths
 
 
@@ -225,14 +230,16 @@ def build_manifest_entries(paths_by_version=None):
     this run.
 
     A version that has never been published has nothing to point at and is left
-    out until it does. So is one with ``publish`` cleared, whatever has been
-    published for it: that is how a version is held back until it is checked.
+    out until it does. So is an unpublished one, whatever has been published
+    for it: that is how a version is held back until it is checked. An unlisted
+    version is described like any other, flagged so clients leave it out of
+    their lists of versions.
     """
     paths_by_version = paths_by_version or {}
     entries_by_election = {}
 
     for version in builders.publishable_versions():
-        if not version.publish:
+        if version.publish_status == version.UNPUBLISHED:
             continue
         paths = paths_by_version.get(version.id) or version.snapshot_paths
         if not paths:

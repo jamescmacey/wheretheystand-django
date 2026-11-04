@@ -103,10 +103,22 @@ class ElectionResultVersion(BaseModel):
         'self', on_delete=models.SET_NULL, blank=True, null=True,
         related_name='+')
 
-    # Whether this version appears in the manifest at all. Clearing it hides a
-    # version that has not been checked yet; its payloads can still be
-    # published, but nothing points a client at them.
-    publish = models.BooleanField(default=True)
+    # Whether this version appears in the manifest, and whether it is listed.
+    # Unpublished hides a version that has not been checked yet: its payloads
+    # can still be published, but nothing points a client at them. Unlisted
+    # puts it in the manifest, so a client can open it by URL and another
+    # version can still compare against it, but it is left out of every list
+    # of versions a visitor can choose from.
+    PUBLISHED = "published"
+    UNLISTED = "unlisted"
+    UNPUBLISHED = "unpublished"
+    PUBLISH_STATUSES = [
+        (PUBLISHED, "Published"),
+        (UNLISTED, "Unlisted"),
+        (UNPUBLISHED, "Unpublished"),
+    ]
+    publish_status = models.CharField(
+        max_length=20, choices=PUBLISH_STATUSES, default=PUBLISHED)
 
     # The two political blocs, as ordered PersistentParty UUIDs, so that parties
     # likely to govern together are drawn together rather than by size. One rule
