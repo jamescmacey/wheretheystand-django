@@ -200,8 +200,14 @@ def build_comparison(comparison_version):
     for results_set in queryset:
         if results_set.results_level == 'national':
             if results_set.results_category == 'party_votes':
-                national['party_votes'] = _comparison_tally(
+                tally = _comparison_tally(
                     results_set, 'parties', _national_party_entry)
+                # Informals included, so the client can work out how many there
+                # were. The field defaults to 0, which is no count at all.
+                cast = results_set.total_votes_cast
+                tally['total_votes_cast'] = (
+                    cast if cast and cast >= tally['total_valid_votes'] else None)
+                national['party_votes'] = tally
             continue
 
         persistent_electorate = (results_set.electorate.electorate_id
