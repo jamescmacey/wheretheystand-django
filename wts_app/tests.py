@@ -2477,7 +2477,9 @@ class ComparisonAndPublishFlagTests(TestCase):
         national = ResultsSet.objects.create(
             results_version=cls.old_version, results_level="national",
             results_category="party_votes", is_final=True,
-            updated=datetime(2023, 11, 3, 14, 0, tzinfo=nz))
+            updated=datetime(2023, 11, 3, 14, 0, tzinfo=nz),
+            total_votes_cast=410)
+        cls.old_national = national
         Result.objects.create(results_set=national, party=blue, count=300,
                               per_cent=99.0, electorate_seats=5, list_seats=10,
                               total_seats=15)
@@ -2543,6 +2545,20 @@ class ComparisonAndPublishFlagTests(TestCase):
         self.assertEqual(blue['total_seats'], 15)
         self.assertIsNone(other['party'])
         self.assertEqual(other['per_cent'], 25.0)
+
+    def test_comparison_carries_votes_cast_for_the_national_tally(self):
+        """Informals are the difference, which is why it has to be there."""
+        comparison = builders.build_comparison(self.old_version)
+        national = comparison['national']['party_votes']
+        self.assertEqual(national['total_votes_cast'], 410)
+        self.assertEqual(national['total_votes_cast'] - national['total_valid_votes'], 10)
+
+    def test_comparison_votes_cast_is_null_without_a_real_count(self):
+        """The field defaults to 0, and fewer cast than valid is no count either."""
+        for cast in (0, 399):
+            ResultsSet.objects.filter(pk=self.old_national.pk).update(total_votes_cast=cast)
+            national = builders.build_comparison(self.old_version)['national']['party_votes']
+            self.assertIsNone(national['total_votes_cast'])
 
     def test_comparison_is_published_with_the_later_version(self):
         with tempfile.TemporaryDirectory() as tmp:
