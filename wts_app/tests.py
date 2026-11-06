@@ -2947,12 +2947,59 @@ class VotingPlaceFirestoreSyncTests(TestCase):
             [self.document(1, address="Renamed"), self.document(2)],
             "--max-removals", "--max-removals", "0")
 
-    def test_removing_a_voting_place_with_results_is_refused(self):
-        ResultsSet.objects.create(
-            results_version=self.version, results_level="voting_place",
-            results_category="party", voting_place=self.place(3),
+    def add_results(self, number, level="voting_place"):
+        return ResultsSet.objects.create(
+            results_version=self.version, results_level=level, results_category="party",
+            voting_place=self.place(number) if number else None,
             updated=datetime(2026, 11, 7, 20, 0, tzinfo=dt_timezone.utc))
-        self.assert_refused([self.document(1, address="Renamed"), self.document(2)], "have results")
+
+    def without_voting_place_3(self):
+        return [self.document(1, address="Renamed"), self.document(2)]
+
+    def test_declining_to_delete_results_changes_nothing(self):
+        results = self.add_results(3)
+        with patch("builtins.input", return_value="n") as ask:
+            self.assert_refused(self.without_voting_place_3(), "nothing was changed")
+        ask.assert_called_once()
+        self.assertTrue(ResultsSet.objects.filter(pk=results.pk).exists())
+
+    def test_an_empty_answer_means_no(self):
+        self.add_results(3)
+        with patch("builtins.input", return_value=""):
+            self.assert_refused(self.without_voting_place_3(), "results were kept")
+
+    def test_no_terminal_to_answer_means_no(self):
+        self.add_results(3)
+        with patch("builtins.input", side_effect=EOFError):
+            self.assert_refused(self.without_voting_place_3(), "results were kept")
+
+    def test_confirming_deletes_the_results_and_the_voting_place(self):
+        removed = self.add_results(3)
+        kept_elsewhere = self.add_results(1)
+        electorate_level = self.add_results(None, level="electorate")
+        with patch("builtins.input", return_value="y") as ask:
+            self.run_sync(self.without_voting_place_3())
+        self.assertIn("1 result set", ask.call_args.args[0])
+        self.assertFalse(ResultsSet.objects.filter(pk=removed.pk).exists())
+        self.assertFalse(ElectionVotingPlace.objects.filter(
+            results_version=self.version, number=3).exists())
+        self.assertTrue(ResultsSet.objects.filter(pk=kept_elsewhere.pk).exists())
+        self.assertTrue(ResultsSet.objects.filter(pk=electorate_level.pk).exists())
+        self.assertEqual(self.place(1).address, "Renamed")
+
+    def test_a_dry_run_reports_results_without_asking(self):
+        results = self.add_results(3)
+        with patch("builtins.input") as ask:
+            output, _ = self.run_sync(self.without_voting_place_3(), "--dry-run")
+        ask.assert_not_called()
+        self.assertIn("3: 1 result set", output)
+        self.assertTrue(ResultsSet.objects.filter(pk=results.pk).exists())
+
+    def test_no_question_when_nothing_being_removed_has_results(self):
+        self.add_results(1)
+        with patch("builtins.input") as ask:
+            self.run_sync(self.without_voting_place_3())
+        ask.assert_not_called()
 
     def test_an_unknown_electorate_is_refused(self):
         self.assert_refused(
