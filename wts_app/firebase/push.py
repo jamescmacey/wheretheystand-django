@@ -465,6 +465,27 @@ def push_election_links(version, only=None, *, dry_run=False):
     return written
 
 
+def clear_voting_place_links(document_ids, *, dry_run=False):
+    """Null the link on voting places that no longer match their persistent record.
+
+    `push_election_links` skips rows with no link, so it cannot do this. Left in
+    place, the old link would send readers of Firestore to the wrong place.
+    Returns how many documents were written.
+    """
+    document_ids = list(document_ids)
+    if not document_ids:
+        return 0
+
+    if not dry_run:
+        _require_enabled()
+
+    db = None if dry_run else get_firestore_client()
+    for document_id in document_ids:
+        _write(db, ELECTION_VOTING_PLACES, document_id,
+               {'persistent_voting_place_id': None}, dry_run)
+    return len(document_ids)
+
+
 def _push_persistent(model, collection, builder, ids=None, *, dry_run=False,
                      id_field='firebase_id'):
     """Push a persistent collection, keying documents stably.

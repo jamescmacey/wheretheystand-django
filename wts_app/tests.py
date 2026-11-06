@@ -2745,3 +2745,244 @@ class ElectionVotingPlaceAdminTests(TestCase):
     def test_malformed_version_id_is_not_a_server_error(self):
         response = self.client.get(self.url, {"results_version__id__exact": "nonsense"})
         self.assertLess(response.status_code, 500)
+
+
+class VotingPlaceFirestoreSyncTests(TestCase):
+    """Late voting place changes arriving without losing curated links."""
+
+    @classmethod
+    def setUpTestData(cls):
+        nz = dt_timezone(timedelta(hours=13))
+        election = Election.objects.create(
+            name="2026 General Election", polling_date=date(2026, 11, 7),
+            polls_close=datetime(2026, 11, 7, 19, 0, tzinfo=nz))
+        cls.version = ElectionResultVersion.objects.create(
+            election=election, name="Election night", is_primary=True,
+            access_mode="firebase", firebase_id="ge2026_prelim")
+        cls.electorate_1 = ElectionElectorate.objects.create(
+            results_version=cls.version, number=1, name="One", firebase_id="e1")
+        cls.electorate_2 = ElectionElectorate.objects.create(
+            results_version=cls.version, number=2, name="Two", firebase_id="e2")
+        cls.hall_record = PersistentVotingPlace.objects.create(
+            address="Hall", latitude=-41.0, longitude=174.0, firebase_id="pvp_hall")
+        for number, address in ((1, "Hall, 1 Main Street"), (2, "School, 2 Main Street"),
+                                (3, "Church, 3 Main Street")):
+            ElectionVotingPlace.objects.create(
+                results_version=cls.version, number=number, firebase_id=f"ge2026_prelim_{number}",
+                physical_electorate=cls.electorate_1, address=address,
+                latitude=-41.0, longitude=174.0, persistent_voting_place=cls.hall_record)
+
+    def document(self, number, address=None, latitude=-41.0, longitude=174.0, electorate=1, link="pvp_hall"):
+        row = ElectionVotingPlace.objects.filter(results_version=self.version, number=number).first()
+        data = {
+            "event_id": "ge2026_prelim",
+            "voting_place_id": number,
+            "physical_electorate_id": electorate,
+            "address": address if address is not None else row.address,
+            "latitude": latitude,
+            "longitude": longitude,
+            "persistent_voting_place_id": link,
+        }
+
+        class Document:
+            id = f"ge2026_prelim_{number}"
+
+            @staticmethod
+            def to_dict():
+                return data
+
+        return Document
+
+    def run_sync(self, documents, *arguments):
+        """Run the command with Firestore stubbed, returning its output and link writes."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from .firebase import push
+        from .management.commands import sync_voting_places_from_firestore as command
+
+        class Query:
+            @staticmethod
+            def stream():
+                return iter(documents)
+
+        class Client:
+            @staticmethod
+            def collection(name):
+                self.assertEqual(name, "election_voting_places")
+                return object()
+
+        writes = []
+
+        def record(db, collection, document_id, payload, dry_run):
+            writes.append((collection, document_id, payload))
+            return document_id
+
+        output = StringIO()
+        with patch.object(command, "get_firestore_client", Client), \
+                patch.object(command, "event_filter", lambda ref, event: Query), \
+                patch.object(push, "get_firestore_client", Client), \
+                patch.object(push, "is_firebase_push_enabled", lambda: True), \
+                patch.object(push, "_write", record):
+            call_command("sync_voting_places_from_firestore",
+                         "--election-slug", self.version.election.slug,
+                         "--version-slug", self.version.slug,
+                         *arguments, stdout=output)
+        return output.getvalue(), writes
+
+    def place(self, number):
+        return ElectionVotingPlace.objects.get(results_version=self.version, number=number)
+
+    def unchanged(self):
+        return [self.document(1), self.document(2), self.document(3)]
+
+    def test_identical_data_changes_nothing(self):
+        before = self.place(1).updated_at
+        output, writes = self.run_sync(self.unchanged())
+        self.assertIn("Nothing to do", output)
+        self.assertEqual(writes, [])
+        self.assertEqual(self.place(1).updated_at, before)
+
+    def test_a_dry_run_writes_nothing(self):
+        documents = [self.document(1, address="Renamed"), self.document(2, latitude=None, longitude=None)]
+        output, writes = self.run_sync(documents, "--dry-run")
+        self.assertIn("Dry run", output)
+        self.assertEqual(writes, [])
+        self.assertEqual(self.place(1).address, "Hall, 1 Main Street")
+        self.assertIsNotNone(self.place(2).persistent_voting_place)
+        self.assertTrue(ElectionVotingPlace.objects.filter(number=3).exists())
+
+    def test_an_address_change_keeps_the_link_and_asks_for_a_check(self):
+        output, writes = self.run_sync(
+            [self.document(1, address="Hall, 4 Other Street"), self.document(2), self.document(3)])
+        place = self.place(1)
+        self.assertEqual(place.address, "Hall, 4 Other Street")
+        self.assertEqual(place.persistent_voting_place, self.hall_record)
+        self.assertIn("check it still fits", output)
+        self.assertEqual(writes, [])
+
+    def test_a_link_absent_from_firestore_does_not_clear_the_row(self):
+        """The reason firebase_migrate_elections is not safe here."""
+        self.run_sync([self.document(1, address="Renamed", link=None), self.document(2), self.document(3)])
+        self.assertEqual(self.place(1).persistent_voting_place, self.hall_record)
+
+    def test_small_drift_updates_coordinates_and_keeps_the_link(self):
+        self.run_sync([self.document(1, latitude=-41.0001), self.document(2), self.document(3)])
+        place = self.place(1)
+        self.assertEqual(place.latitude, -41.0001)
+        self.assertEqual(place.persistent_voting_place, self.hall_record)
+
+    def assert_link_cleared(self, document):
+        output, writes = self.run_sync([document, self.document(2), self.document(3)])
+        self.assertIsNone(self.place(1).persistent_voting_place)
+        self.assertIn("rematch", output)
+        self.assertEqual(writes, [("election_voting_places", "ge2026_prelim_1",
+                                   {"persistent_voting_place_id": None})])
+
+    def test_a_move_clears_the_link_in_both_places(self):
+        self.assert_link_cleared(self.document(1, latitude=-41.01))
+        self.assertEqual(self.place(1).latitude, -41.01)
+
+    def test_removed_coordinates_clear_the_link_in_both_places(self):
+        self.assert_link_cleared(self.document(1, latitude=None, longitude=None))
+        self.assertIsNone(self.place(1).latitude)
+
+    def test_only_the_link_field_is_written_to_firestore(self):
+        _, writes = self.run_sync(
+            [self.document(1, latitude=-41.01), self.document(2), self.document(3)])
+        for _, _, payload in writes:
+            self.assertEqual(list(payload), ["persistent_voting_place_id"])
+
+    def test_a_new_voting_place_is_created(self):
+        new = self.document(4, address="New Shops", latitude=-42.0, longitude=175.0, electorate=2, link=None)
+        self.run_sync([*self.unchanged(), new])
+        place = self.place(4)
+        self.assertEqual(place.address, "New Shops")
+        self.assertEqual(place.physical_electorate, self.electorate_2)
+        self.assertEqual(place.firebase_id, "ge2026_prelim_4")
+        self.assertIsNone(place.persistent_voting_place)
+
+    def test_a_removed_voting_place_goes_but_its_persistent_record_stays(self):
+        self.run_sync([self.document(1), self.document(2)])
+        self.assertFalse(ElectionVotingPlace.objects.filter(results_version=self.version, number=3).exists())
+        self.assertTrue(PersistentVotingPlace.objects.filter(pk=self.hall_record.pk).exists())
+
+    def test_a_removal_does_not_switch_search_indexing_on(self):
+        """Tests run with it off, as these credentials reach a live index."""
+        from .index import ElectionVotingPlaceIndex
+
+        self.run_sync([self.document(1), self.document(2)])
+        with patch.object(ElectionVotingPlaceIndex, "save_record") as save_record:
+            ElectionVotingPlace.objects.create(
+                results_version=self.version, number=5, firebase_id="ge2026_prelim_5",
+                physical_electorate=self.electorate_1, address="Later")
+        save_record.assert_not_called()
+
+    def test_other_results_versions_are_untouched(self):
+        other = ElectionResultVersion.objects.create(
+            election=self.version.election, name="Official", firebase_id="ge2026_official")
+        electorate = ElectionElectorate.objects.create(
+            results_version=other, number=1, name="One", firebase_id="other_e1")
+        kept = ElectionVotingPlace.objects.create(
+            results_version=other, number=3, firebase_id="other_3", physical_electorate=electorate,
+            address="Church", latitude=-41.0, longitude=174.0)
+        self.run_sync([self.document(1), self.document(2)])
+        self.assertTrue(ElectionVotingPlace.objects.filter(pk=kept.pk).exists())
+
+    def assert_refused(self, documents, message, *arguments):
+        from django.core.management.base import CommandError
+
+        count = ElectionVotingPlace.objects.count()
+        with self.assertRaisesMessage(CommandError, message):
+            self.run_sync(documents, *arguments)
+        self.assertEqual(ElectionVotingPlace.objects.count(), count)
+        self.assertEqual(self.place(1).address, "Hall, 1 Main Street")
+
+    def test_no_documents_is_refused(self):
+        self.assert_refused([], "no voting places")
+
+    def test_too_many_removals_are_refused(self):
+        self.assert_refused(
+            [self.document(1, address="Renamed"), self.document(2)],
+            "--max-removals", "--max-removals", "0")
+
+    def test_removing_a_voting_place_with_results_is_refused(self):
+        ResultsSet.objects.create(
+            results_version=self.version, results_level="voting_place",
+            results_category="party", voting_place=self.place(3),
+            updated=datetime(2026, 11, 7, 20, 0, tzinfo=dt_timezone.utc))
+        self.assert_refused([self.document(1, address="Renamed"), self.document(2)], "have results")
+
+    def test_an_unknown_electorate_is_refused(self):
+        self.assert_refused(
+            [self.document(1, address="Renamed", electorate=99), self.document(2), self.document(3)],
+            "electorate 99")
+
+    def test_clearing_a_link_where_firestore_writes_are_disabled_changes_nothing(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        from .management.commands import sync_voting_places_from_firestore as command
+
+        class Query:
+            documents = [self.document(1, latitude=-41.01), self.document(2), self.document(3)]
+
+            @classmethod
+            def stream(cls):
+                return iter(cls.documents)
+
+        class Client:
+            @staticmethod
+            def collection(name):
+                return object()
+
+        with patch.object(command, "get_firestore_client", Client), \
+                patch.object(command, "event_filter", lambda ref, event: Query), \
+                override_settings(FIREBASE_PUSH_ENABLED=False):
+            with self.assertRaisesMessage(CommandError, "Nothing was changed"):
+                call_command("sync_voting_places_from_firestore",
+                             "--election-slug", self.version.election.slug,
+                             "--version-slug", self.version.slug)
+        self.assertEqual(self.place(1).persistent_voting_place, self.hall_record)
+        self.assertEqual(self.place(1).latitude, -41.0)
