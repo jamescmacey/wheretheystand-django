@@ -23,6 +23,7 @@ from algoliasearch_django.decorators import disable_auto_indexing
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Count
 
 from wts_app.firebase import push
 from wts_app.firebase.client import event_filter, get_firestore_client
@@ -162,6 +163,8 @@ def apply_plan(plan):
     Firestore goes first because a failure there leaves this database unchanged,
     so running the command again finds the same work. In the other order, a
     failure would leave a stale link in Firestore that nothing would look for.
+
+    Results for the voting places being removed go too. The command asks first.
     """
     push.clear_voting_place_links(plan.clear_in_firestore)
 
@@ -179,9 +182,10 @@ def apply_plan(plan):
         # auto indexing was off, so it's only used where it was on.
         pause_indexing = (disable_auto_indexing(ElectionVotingPlace)
                           if settings.ALGOLIA.get('AUTO_INDEXING') else nullcontext())
+        removed = [row.pk for row in plan.delete]
         with pause_indexing:
-            ElectionVotingPlace.objects.filter(
-                pk__in=[row.pk for row in plan.delete]).delete()
+            ResultsSet.objects.filter(voting_place__in=removed).delete()
+            ElectionVotingPlace.objects.filter(pk__in=removed).delete()
 
 
 class Command(BaseCommand):
@@ -214,9 +218,19 @@ class Command(BaseCommand):
             self.stdout.write('Nothing to do.')
             return
 
+        with_results = self.results_to_delete(plan)
+        self.report_results(with_results)
+
         if options['dry_run']:
+            if with_results:
+                self.stdout.write('A real run asks before deleting these results.')
             self.stdout.write(self.style.WARNING('Dry run. Nothing was written.'))
             return
+
+        if with_results and not self.confirm_results_deletion(with_results):
+            raise CommandError(
+                'Those results were kept, so nothing was changed. Voting places '
+                'with results cannot be removed without deleting them.')
 
         try:
             apply_plan(plan)
@@ -242,14 +256,32 @@ class Command(BaseCommand):
                 f'{len(plan.delete)} voting places would be removed, over the limit of '
                 f'{max_removals}. Check Firestore, then raise --max-removals if it is right.')
 
-        # Deleting a row cascades to its results.
-        with_results = sorted(set(
-            ResultsSet.objects.filter(voting_place__in=[row.pk for row in plan.delete])
-            .values_list('voting_place__number', flat=True)))
+    def results_to_delete(self, plan):
+        """Result set counts for the voting places being removed, by number."""
+        rows = (ResultsSet.objects
+                .filter(voting_place__in=[row.pk for row in plan.delete])
+                .values('voting_place__number')
+                .annotate(count=Count('pk'))
+                .order_by('voting_place__number'))
+        return {row['voting_place__number']: row['count'] for row in rows}
+
+    def report_results(self, with_results):
         if with_results:
-            raise CommandError(
-                'These voting places have results and would be removed: '
-                + ', '.join(str(number) for number in with_results))
+            self.stdout.write('Voting places being removed that have results')
+            for number, count in with_results.items():
+                self.stdout.write(f'  {number}: {count} result set(s)')
+            self.stdout.write('')
+
+    def confirm_results_deletion(self, with_results):
+        """Ask before deleting results. No answer, as in a script, means no."""
+        total = sum(with_results.values())
+        try:
+            answer = input(
+                f'Delete these {total} result set(s) and remove the voting places? [y/N] ')
+        except EOFError:
+            self.stdout.write('')
+            return False
+        return answer.strip().lower() in ('y', 'yes')
 
     def report(self, version, document_count, plan):
         write = self.stdout.write
