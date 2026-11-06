@@ -2,11 +2,15 @@ from django.apps import apps
 from django.contrib import admin, messages
 from django.contrib.admin.sites import AlreadyRegistered
 from django.contrib.auth.admin import UserAdmin
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 from wts_app.models import User
 from wts_app.models.elections import (
     ElectionCandidate,
+    ElectionElectorate,
     ElectionResultVersion,
+    ElectionVotingPlace,
     ElectorateIncumbent,
     PartyIncumbent,
     PersistentCandidate,
@@ -229,6 +233,115 @@ class ElectionCandidateAdmin(admin.ModelAdmin):
                    ordering="results_version__election__polling_date")
     def election(self, obj):
         return obj.results_version.election
+
+
+class VotingPlaceElectorateFilter(admin.SimpleListFilter):
+    """Filter by electorate name, narrowed to whatever is already selected.
+
+    By name rather than by row, because each version has its own copy of every
+    electorate: a plain foreign key filter would list each one once per version,
+    and a choice would stop matching as soon as the version filter changed.
+    """
+
+    title = "electorate"
+    parameter_name = "electorate"
+
+    def lookups(self, request, model_admin):
+        electorates = ElectionElectorate.objects.all()
+        version = request.GET.get("results_version__id__exact")
+        election = request.GET.get("results_version__election__id__exact")
+        try:
+            if version:
+                electorates = electorates.filter(results_version_id=version)
+            elif election:
+                electorates = electorates.filter(
+                    results_version__election_id=election)
+            names = list(electorates.order_by("name")
+                         .values_list("name", flat=True).distinct())
+        except ValidationError:
+            # A hand-edited URL with a malformed id. The changelist reports
+            # that itself; it should not be a server error here first.
+            names = []
+        return [(name, name) for name in names]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(physical_electorate__name=self.value())
+        return queryset
+
+
+class VotingPlaceCoordinatesFilter(admin.SimpleListFilter):
+    """Places without a location cannot be drawn on the map."""
+
+    title = "coordinates"
+    parameter_name = "has_coordinates"
+
+    def lookups(self, request, model_admin):
+        return [("yes", "Has coordinates"), ("no", "Missing coordinates")]
+
+    def queryset(self, request, queryset):
+        located = Q(latitude__isnull=False, longitude__isnull=False)
+        if self.value() == "yes":
+            return queryset.filter(located)
+        if self.value() == "no":
+            return queryset.exclude(located)
+        return queryset
+
+
+class VotingPlacePersistentFilter(admin.SimpleListFilter):
+    """Places not yet matched to a persistent voting place."""
+
+    title = "persistent voting place"
+    parameter_name = "has_persistent"
+
+    def lookups(self, request, model_admin):
+        return [("yes", "Matched"), ("no", "Not matched")]
+
+    def queryset(self, request, queryset):
+        if self.value() == "yes":
+            return queryset.filter(persistent_voting_place__isnull=False)
+        if self.value() == "no":
+            return queryset.filter(persistent_voting_place__isnull=True)
+        return queryset
+
+
+@admin.register(ElectionVotingPlace)
+class ElectionVotingPlaceAdmin(admin.ModelAdmin):
+    """Voting places as they stood in one results version.
+
+    Filtered by election first and version second, as candidates are, because
+    each version carries its own copy of every voting place. raw_id_fields
+    because a general election has thousands of them, and a select on the
+    persistent voting place would load every one into the change form.
+    """
+
+    list_display = ("address", "number", "electorate_name", "latitude",
+                    "longitude", "election", "results_version", "is_matched")
+    list_filter = ("results_version__election", "results_version",
+                   VotingPlaceElectorateFilter, VotingPlaceCoordinatesFilter,
+                   VotingPlacePersistentFilter)
+    search_fields = ("address", "=number", "physical_electorate__name",
+                     "persistent_voting_place__address", "firebase_id")
+    ordering = ("-results_version__election__polling_date", "results_version",
+                "number")
+    raw_id_fields = ("results_version", "physical_electorate",
+                     "persistent_voting_place")
+    list_select_related = ("results_version__election", "physical_electorate")
+
+    @admin.display(description="Electorate",
+                   ordering="physical_electorate__name")
+    def electorate_name(self, obj):
+        return obj.physical_electorate.name
+
+    @admin.display(description="Election",
+                   ordering="results_version__election__polling_date")
+    def election(self, obj):
+        return obj.results_version.election
+
+    @admin.display(description="Matched", boolean=True,
+                   ordering="persistent_voting_place")
+    def is_matched(self, obj):
+        return obj.persistent_voting_place_id is not None
 
 
 @admin.register(ElectorateIncumbent)

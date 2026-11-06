@@ -2619,3 +2619,129 @@ class ComparisonAndPublishFlagTests(TestCase):
         # A published version still compares against an unlisted one.
         self.assertIn('comparison', published['2026-general-election/election-night'])
         self.assertIn('comparison', entries['election-night']['paths'])
+
+
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+
+
+class ElectionVotingPlaceAdminTests(TestCase):
+    """bulk_create throughout: it skips the post_save signals that would
+    otherwise reach Algolia, Firestore and the snapshot publisher."""
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.admin_user = user_model(username="admin", email="admin@example.com",
+                                    is_staff=True, is_superuser=True)
+        user_model.objects.bulk_create([cls.admin_user])
+
+        cls.election = Election(name="General 2023",
+                                polling_date=date(2023, 10, 14),
+                                polls_close=datetime(2023, 10, 14, 6,
+                                                     tzinfo=dt_timezone.utc))
+        Election.objects.bulk_create([cls.election])
+
+        cls.version_a = ElectionResultVersion(election=cls.election, name="Preliminary")
+        cls.version_b = ElectionResultVersion(election=cls.election, name="Official")
+        ElectionResultVersion.objects.bulk_create([cls.version_a, cls.version_b])
+
+        wellington_a = ElectionElectorate(results_version=cls.version_a, number=1,
+                                          name="Wellington Central")
+        rongotai_a = ElectionElectorate(results_version=cls.version_a, number=2,
+                                        name="Rongotai")
+        wellington_b = ElectionElectorate(results_version=cls.version_b, number=1,
+                                          name="Wellington Central")
+        ohariu_b = ElectionElectorate(results_version=cls.version_b, number=3,
+                                      name="Ohariu")
+        ElectionElectorate.objects.bulk_create(
+            [wellington_a, rongotai_a, wellington_b, ohariu_b])
+
+        cls.persistent = PersistentVotingPlace(address="St Peter's Hall")
+        PersistentVotingPlace.objects.bulk_create([cls.persistent])
+
+        cls.hall = ElectionVotingPlace(
+            results_version=cls.version_a, number=101,
+            physical_electorate=wellington_a, address="St Peter's Hall",
+            latitude=-41.29, longitude=174.77,
+            persistent_voting_place=cls.persistent)
+        cls.school = ElectionVotingPlace(
+            results_version=cls.version_a, number=102,
+            physical_electorate=rongotai_a, address="Kilbirnie School")
+        cls.hall_official = ElectionVotingPlace(
+            results_version=cls.version_b, number=101,
+            physical_electorate=wellington_b, address="St Peter's Hall")
+        ElectionVotingPlace.objects.bulk_create(
+            [cls.hall, cls.school, cls.hall_official])
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+        self.url = reverse("admin:wts_app_electionvotingplace_changelist")
+
+    def results(self, **params):
+        response = self.client.get(self.url, params)
+        self.assertEqual(response.status_code, 200)
+        return response, {place.pk for place in response.context["cl"].result_list}
+
+    def test_lists_everything_by_default(self):
+        _, found = self.results()
+        self.assertEqual(found, {self.hall.pk, self.school.pk, self.hall_official.pk})
+
+    def test_search_by_address(self):
+        _, found = self.results(q="Kilbirnie")
+        self.assertEqual(found, {self.school.pk})
+
+    def test_search_by_exact_number(self):
+        _, found = self.results(q="102")
+        self.assertEqual(found, {self.school.pk})
+
+    def test_search_by_electorate_name(self):
+        _, found = self.results(q="Rongotai")
+        self.assertEqual(found, {self.school.pk})
+
+    def test_filter_by_results_version(self):
+        _, found = self.results(results_version__id__exact=self.version_b.pk)
+        self.assertEqual(found, {self.hall_official.pk})
+
+    def test_filter_by_election(self):
+        _, found = self.results(results_version__election__id__exact=self.election.pk)
+        self.assertEqual(found, {self.hall.pk, self.school.pk, self.hall_official.pk})
+
+    def test_electorate_filter_matches_across_versions(self):
+        _, found = self.results(electorate="Wellington Central")
+        self.assertEqual(found, {self.hall.pk, self.hall_official.pk})
+
+    def electorate_choices(self, **params):
+        response, _ = self.results(**params)
+        spec = next(s for s in response.context["cl"].filter_specs
+                    if getattr(s, "parameter_name", None) == "electorate")
+        return [name for name, _ in spec.lookup_choices]
+
+    def test_electorate_choices_are_distinct_names(self):
+        self.assertEqual(self.electorate_choices(),
+                         ["Ohariu", "Rongotai", "Wellington Central"])
+
+    def test_electorate_choices_narrow_to_the_selected_version(self):
+        self.assertEqual(
+            self.electorate_choices(results_version__id__exact=self.version_a.pk),
+            ["Rongotai", "Wellington Central"])
+
+    def test_filter_by_coordinates(self):
+        _, found = self.results(has_coordinates="yes")
+        self.assertEqual(found, {self.hall.pk})
+        _, found = self.results(has_coordinates="no")
+        self.assertEqual(found, {self.school.pk, self.hall_official.pk})
+
+    def test_filter_by_persistent_match(self):
+        _, found = self.results(has_persistent="yes")
+        self.assertEqual(found, {self.hall.pk})
+        _, found = self.results(has_persistent="no")
+        self.assertEqual(found, {self.school.pk, self.hall_official.pk})
+
+    def test_search_and_filters_combine(self):
+        _, found = self.results(q="Peter", results_version__id__exact=self.version_a.pk)
+        self.assertEqual(found, {self.hall.pk})
+
+    def test_malformed_version_id_is_not_a_server_error(self):
+        response = self.client.get(self.url, {"results_version__id__exact": "nonsense"})
+        self.assertLess(response.status_code, 500)
